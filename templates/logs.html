@@ -1,0 +1,354 @@
+{% extends "base.html" %}
+
+{% block title %}Logs{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>Logs</h1>
+        <p>Live event stream from Kat</p>
+    </div>
+
+    <span class="count-pill" id="count">
+        {{ logs | length }} {{ 'entry' if logs | length == 1 else 'entries' }}
+    </span>
+</div>
+
+<div class="logs-toolbar">
+    <div class="filter-group">
+        <button class="filter-btn active" data-level="ALL">All</button>
+        <button class="filter-btn" data-level="READY">Ready</button>
+        <button class="filter-btn" data-level="EVAL">Eval</button>
+        <button class="filter-btn" data-level="ERROR">Error</button>
+        <button class="filter-btn" data-level="CMD">CMD</button>
+    </div>
+
+    <div class="search-wrap">
+        <i class="ti ti-search"></i>
+        <input
+            type="text"
+            id="logSearch"
+            placeholder="Search logs…"
+            autocomplete="off"
+        />
+    </div>
+</div>
+
+<div class="copy-toast" id="copyToast">Copied!</div>
+
+<div class="log-box">
+    <div class="log-header">
+        <span>Time</span>
+        <span>Level</span>
+        <span>Details</span>
+    </div>
+
+    {% if logs %}
+        {% set ns = namespace(last_date='') %}
+
+        {% for entry in logs | reverse %}
+            {% set entry_date = entry.timestamp[:10] %}
+
+            {% if entry_date != ns.last_date %}
+                {% set ns.last_date = entry_date %}
+
+                <div class="log-date-divider">
+                    <span>{{ entry_date }}</span>
+                </div>
+            {% endif %}
+
+            <div class="log-entry" data-level="{{ entry.level }}">
+                <span
+                    class="log-ts copyable"
+                    data-ts="{{ entry.timestamp }}"
+                    title="Click to copy unix timestamp"
+                >
+                    {{ entry.timestamp[11:] }}
+                </span>
+
+                <span>
+                    <span class="lvl lvl-{{ entry.level }}">
+                        {{ entry.level }}
+                    </span>
+                </span>
+
+                {% if entry.level in ('CMD', 'CMND') and entry.parts %}
+                    <span class="log-msg cmd-row">
+                        <span
+                            class="cmd-chip copyable"
+                            data-copy="{{ entry.parts.user_id }}"
+                            title="Copy user ID"
+                        >
+                            <i class="ti ti-user"></i>{{ entry.parts.username }}
+                        </span>
+
+                        <span class="cmd-sep">/</span>
+
+                        <span
+                            class="cmd-chip copyable"
+                            data-copy="{{ entry.parts.guild_id }}"
+                            title="Copy server ID"
+                        >
+                            <i class="ti ti-building-community"></i>{{ entry.parts.guild }}
+                        </span>
+
+                        <span class="cmd-sep">/</span>
+
+                        <span
+                            class="cmd-chip copyable"
+                            data-copy="{{ entry.parts.channel_id }}"
+                            title="Copy channel ID"
+                        >
+                            <i class="ti ti-hash"></i>{{ entry.parts.channel }}
+                        </span>
+
+                        <span class="cmd-sep">›</span>
+
+                        <span class="cmd-chip cmd-name">
+                            <i class="ti ti-terminal-2"></i>{{ entry.parts.command }}
+                        </span>
+                    </span>
+
+                {% elif entry.level == 'EVAL' and entry.parts %}
+                    {% set full_eval = "User: " ~ entry.parts.username ~ " (" ~ entry.parts.user_id ~ ")\nCode:\n" ~ entry.parts.code ~ ("\n\nResult: " ~ entry.parts.result if entry.parts.result else "") %}
+
+                    <span class="log-msg eval-row">
+                        <span
+                            class="cmd-chip copyable"
+                            data-copy="{{ entry.parts.user_id }}"
+                            title="Copy user ID"
+                        >
+                            <i class="ti ti-user"></i>{{ entry.parts.username }}
+                        </span>
+
+                        {% if entry.parts.channel_id is defined and entry.parts.channel_id %}
+                            <span class="cmd-sep">/</span>
+
+                            <span
+                                class="cmd-chip copyable"
+                                data-copy="{{ entry.parts.guild_id }}"
+                                title="Copy server ID"
+                            >
+                                <i class="ti ti-building-community"></i>{{ entry.parts.guild }}
+                            </span>
+
+                            <span class="cmd-sep">/</span>
+
+                            <span
+                                class="cmd-chip copyable"
+                                data-copy="{{ entry.parts.channel_id }}"
+                                title="Copy channel ID"
+                            >
+                                <i class="ti ti-hash"></i>{{ entry.parts.channel }}
+                            </span>
+                        {% endif %}
+
+                        <span class="cmd-sep">›</span>
+
+                        <span
+                            class="cmd-chip eval-code copyable {% if entry.parts.error %}eval-error{% endif %}"
+                            data-copy="{{ full_eval }}"
+                            title="Click to copy full eval"
+                        >
+                            <i class="ti ti-code"></i>
+
+                            <span class="eval-preview">
+                                {{ entry.parts.code | truncate(55, true, '…') }}
+                            </span>
+                        </span>
+                    </span>
+
+                {% elif entry.level == 'ERROR' and entry.parts %}
+                    <span class="log-msg cmd-row">
+                        <span
+                            class="cmd-chip copyable"
+                            data-copy="{{ entry.parts.user_id }}"
+                            title="Copy user ID"
+                        >
+                            <i class="ti ti-user"></i>{{ entry.parts.username }}
+                        </span>
+
+                        <span class="cmd-sep">/</span>
+
+                        <span
+                            class="cmd-chip copyable"
+                            data-copy="{{ entry.parts.guild_id }}"
+                            title="Copy server ID"
+                        >
+                            <i class="ti ti-building-community"></i>{{ entry.parts.guild }}
+                        </span>
+
+                        <span class="cmd-sep">/</span>
+
+                        <span
+                            class="cmd-chip copyable"
+                            data-copy="{{ entry.parts.channel_id }}"
+                            title="Copy channel ID"
+                        >
+                            <i class="ti ti-hash"></i>{{ entry.parts.channel }}
+                        </span>
+
+                        <span class="cmd-sep">›</span>
+
+                        <span class="cmd-chip cmd-name error-name">
+                            <i class="ti ti-terminal-2"></i>{{ entry.parts.command }}
+                        </span>
+
+                        <span class="cmd-sep">—</span>
+
+                        <span
+                            class="cmd-chip eval-error"
+                            title="{{ entry.parts.message }}"
+                        >
+                            <i class="ti ti-alert-triangle"></i>
+                            {{ entry.parts.message | truncate(60, true, '…') }}
+                        </span>
+
+                    </span>
+
+                {% else %}
+                    <span class="log-msg">
+                        {{ entry.message }}
+                    </span>
+                {% endif %}
+            </div>
+        {% endfor %}
+    {% else %}
+        <div class="empty">
+            <i
+                class="ti ti-notes-off"
+                style="font-size:28px;display:block;margin-bottom:10px;opacity:0.4;"
+            ></i>
+
+            No logs yet. Kat will start logging once active.
+        </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const entries = document.querySelectorAll('.log-entry');
+    const countEl = document.getElementById('count');
+    const searchEl = document.getElementById('logSearch');
+    const toast = document.getElementById('copyToast');
+
+    let activeLevel = 'ALL';
+    let toastTimer;
+
+    function showToast(label) {
+        toast.textContent = 'Copied: ' + label;
+        toast.classList.add('visible');
+
+        clearTimeout(toastTimer);
+
+        toastTimer = setTimeout(() => {
+            toast.classList.remove('visible');
+        }, 1800);
+    }
+
+    document.querySelectorAll('.copyable').forEach(el => {
+        el.addEventListener('click', () => {
+            const tsRaw = el.dataset.ts;
+
+            if (tsRaw) {
+                const unix = Math.floor(
+                    new Date(tsRaw.replace(' ', 'T')).getTime() / 1000
+                );
+
+                navigator.clipboard
+                    .writeText("<t:" + String(unix) + ">")
+                    .then(() => showToast(unix));
+            } else {
+                const val = el.dataset.copy;
+
+                navigator.clipboard.writeText(val).then(() => {
+                    const label = el.classList.contains('eval-code')
+                        ? 'eval copied'
+                        : val;
+
+                    showToast(label);
+                });
+            }
+        });
+    });
+
+    function updateDividers() {
+        document.querySelectorAll('.log-date-divider').forEach(div => {
+            let el = div.nextElementSibling;
+            let hasVisible = false;
+
+            while (el && !el.classList.contains('log-date-divider')) {
+                if (
+                    el.classList.contains('log-entry') &&
+                    !el.classList.contains('hidden')
+                ) {
+                    hasVisible = true;
+                    break;
+                }
+
+                el = el.nextElementSibling;
+            }
+
+            div.classList.toggle('hidden', !hasVisible);
+        });
+    }
+
+    function updateCount() {
+        const n = [...entries].filter(
+            e => !e.classList.contains('hidden')
+        ).length;
+
+        countEl.textContent =
+            n + (n === 1 ? ' entry' : ' entries');
+    }
+
+    function applyFilters() {
+        const q = searchEl.value.trim().toLowerCase();
+
+        entries.forEach(el => {
+            const lvl = el.dataset.level;
+            const msgEl = el.querySelector('.log-msg');
+            const tsEl = el.querySelector('.log-ts');
+
+            const text =
+                (msgEl ? msgEl.textContent : '') +
+                ' ' +
+                (tsEl ? tsEl.dataset.ts : '');
+
+            const levelOk =
+                activeLevel === 'ALL' ||
+                lvl === activeLevel ||
+                (activeLevel === 'CMD' && lvl === 'CMND');
+
+            const srchOk =
+                !q ||
+                text.toLowerCase().includes(q) ||
+                lvl.toLowerCase().includes(q);
+
+            el.classList.toggle(
+                'hidden',
+                !(levelOk && srchOk)
+            );
+        });
+
+        updateDividers();
+        updateCount();
+    }
+
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document
+                .querySelectorAll('.filter-btn')
+                .forEach(b => b.classList.remove('active'));
+
+            btn.classList.add('active');
+            activeLevel = btn.dataset.level;
+
+            applyFilters();
+        });
+    });
+
+    searchEl.addEventListener('input', applyFilters);
+</script>
+{% endblock %}

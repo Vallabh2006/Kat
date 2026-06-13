@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{% block title %}Kat{% endblock %} — Discord Bot</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+
+    {% block head %}{% endblock %}
+</head>
+<body>
+
+    <div class="orb orb1"></div>
+    <div class="orb orb2"></div>
+    <div class="orb orb3"></div>
+
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-brand">
+            <div class="brand-icon">
+                <i class="ti ti-brand-discord"></i>
+            </div>
+
+            <span class="brand-name">Kat</span>
+
+            <div class="brand-status {{ 'online' if bot_ready else 'offline' }}"></div>
+        </div>
+
+        <nav class="sidebar-nav">
+            <a href="/" class="nav-item {{ 'active' if request.path == '/' else '' }}">
+                <i class="ti ti-layout-dashboard"></i>
+                <span>Dashboard</span>
+            </a>
+
+            <a href="/logs" class="nav-item {{ 'active' if request.path == '/logs' else '' }}">
+                <i class="ti ti-file-text"></i>
+                <span>Logs</span>
+            </a>
+        </nav>
+
+        <div class="sidebar-footer">
+            <div class="bot-tag">
+                <div class="bot-avatar">
+                    {% if bot_avatar %}
+                        <img src="{{ bot_avatar }}" alt="Kat" />
+                    {% else %}
+                        <i class="ti ti-robot"></i>
+                    {% endif %}
+                </div>
+
+                <div class="bot-info">
+                    <span class="bot-name">{{ bot_name or 'Kat' }}</span>
+                    <span class="bot-disc">BOT</span>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <header class="topbar">
+        <button class="topbar-toggle" id="sidebarToggle" aria-label="Toggle sidebar">
+            <i class="ti ti-menu-2"></i>
+        </button>
+
+        <div class="topbar-brand">
+            <div class="brand-icon sm">
+                <i class="ti ti-brand-discord"></i>
+            </div>
+
+            <span>Kat</span>
+        </div>
+    </header>
+
+    <main class="main">
+        {% block content %}{% endblock %}
+    </main>
+
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+    <script>
+        const toggle = document.getElementById('sidebarToggle');
+        const overlay = document.getElementById('sidebarOverlay');
+        const sidebar = document.getElementById('sidebar');
+
+        function closeSidebar() {
+            sidebar.classList.remove('open');
+            overlay.classList.remove('visible');
+        }
+
+        toggle?.addEventListener('click', () => {
+            sidebar.classList.toggle('open');
+            overlay.classList.toggle('visible');
+        });
+
+        overlay?.addEventListener('click', closeSidebar);
+    </script>
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>

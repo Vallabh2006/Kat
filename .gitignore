@@ -7,3 +7,5 @@ logs/
 
 *.pyc
 *.pyo
+*.pem
+*-key.pem

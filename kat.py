@@ -91,6 +91,36 @@ async def setServerVar(ctx, name, guild_id=None, value=None):
     conn.commit()
     cur.close()
     conn.close()
+    return True
+
+async def getServerVar(ctx, name, guild_id=None):
+
+    conn = psycopg2.connect(host=db_host, dbname=db_name, user=db_user, password=db_pass, port=db_port)
+    cur = conn.cursor()
+
+    if not guild_id:
+        guildid = int((await _get_guild(ctx)).id)
+    else:
+        guildid = int(guild_id)
+
+    cur.execute(
+        "SELECT value FROM server_var WHERE name = %s",
+        (name,)
+    )
+
+    row = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    if row is None:
+        return None
+
+    data = row[0]
+    if isinstance(data, str):
+        data = json.loads(data)
+
+    return data.get(str(guildid))
 
 async def sendMessage(ctx, content, channel_id=None):
     channel = await _get_channel(ctx, channel_id)

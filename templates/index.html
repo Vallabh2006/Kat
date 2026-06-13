@@ -1,0 +1,286 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>Dashboard</h1>
+        <p>Real-time overview of Kat's activity</p>
+    </div>
+
+    <div class="status-pill {{ 'online' if bot_ready else 'offline' }}">
+        <span class="status-dot"></span>
+        {{ 'Online' if bot_ready else 'Offline' }}
+    </div>
+</div>
+
+<div class="stat-grid mb-3">
+    <div class="stat-card glass">
+        <div class="stat-card-icon purple">
+            <i class="ti ti-building-community"></i>
+        </div>
+
+        <div class="stat-card-body">
+            <div class="stat-card-val">{{ guild_count }}</div>
+            <div class="stat-card-key">Servers</div>
+        </div>
+    </div>
+
+    <div class="stat-card glass">
+        <div class="stat-card-icon blue">
+            <i class="ti ti-users"></i>
+        </div>
+
+        <div class="stat-card-body">
+            <div class="stat-card-val">{{ user_count }}</div>
+            <div class="stat-card-key">Users</div>
+        </div>
+    </div>
+
+    <div class="stat-card glass">
+        <div class="stat-card-icon green">
+            <i class="ti ti-terminal-2"></i>
+        </div>
+
+        <div class="stat-card-body">
+            <div class="stat-card-val">{{ command_count }}</div>
+            <div class="stat-card-key">Commands run</div>
+        </div>
+    </div>
+
+    <div class="stat-card glass">
+        <div class="stat-card-icon amber">
+            <i class="ti ti-activity"></i>
+        </div>
+
+        <div class="stat-card-body">
+            <div class="stat-card-val">{{ latency }}</div>
+            <div class="stat-card-key">Latency</div>
+        </div>
+    </div>
+</div>
+
+<div class="dash-grid">
+    <div class="dash-card glass">
+        <div class="dash-card-head">
+            <span>Bot Identity</span>
+
+            <span class="dash-card-badge {{ 'badge-success' if bot_ready else 'badge-error' }}">
+                {{ 'Connected' if bot_ready else 'Disconnected' }}
+            </span>
+        </div>
+
+        <div class="identity-block">
+            <div class="identity-avatar-wrap">
+                <img
+                    id="botAvatar"
+                    class="identity-avatar"
+                    src="{{ bot_avatar or '' }}"
+                    alt="Kat"
+                    onerror="this.style.display='none';document.getElementById('avatarFallback').style.display='flex';"
+                />
+
+                <div
+                    id="avatarFallback"
+                    class="identity-avatar identity-avatar-fallback"
+                    style="display:none;"
+                >
+                    <i class="ti ti-robot"></i>
+                </div>
+
+                <div class="identity-status-dot {{ 'online' if bot_ready else 'offline' }}"></div>
+            </div>
+
+            <div class="identity-info">
+                <div class="identity-name" id="botName">{{ bot_name or 'Kat' }}</div>
+
+                <div class="identity-tag">
+                    BOT • #{{ bot_discriminator or '0000' }}
+                </div>
+
+                <div class="identity-id">
+                    <i class="ti ti-hash"></i>
+                    <span id="botId">{{ bot_id or '—' }}</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="meta-list">
+            <div class="meta-row">
+                <span class="meta-key">
+                    <i class="ti ti-at"></i>
+                    Prefixes
+                </span>
+
+                <span class="meta-val">
+                    {% for p in prefixes %}
+                        <code>{{ p }}</code>
+                    {% endfor %}
+                </span>
+            </div>
+
+            <div class="meta-row">
+                <span class="meta-key">
+                    <i class="ti ti-server"></i>
+                    Port
+                </span>
+
+                <span class="meta-val">
+                    <code>{{ port or 8080 }}</code>
+                </span>
+            </div>
+
+            <div class="meta-row">
+                <span class="meta-key">
+                    <i class="ti ti-refresh"></i>
+                    Status cycle
+                </span>
+
+                <span class="meta-val">
+                    <code>20s</code>
+                </span>
+            </div>
+
+            <div class="meta-row">
+                <span class="meta-key">
+                    <i class="ti ti-clock"></i>
+                    Uptime check
+                </span>
+
+                <span class="meta-val" id="uptimeVal">
+                    <code>—</code>
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <div class="dash-card glass">
+        <div class="dash-card-head">
+            <span>Recent Activity</span>
+
+            <a href="/logs" class="dash-card-link">
+                View all
+                <i class="ti ti-arrow-right"></i>
+            </a>
+        </div>
+
+        <div class="mini-log">
+            {% for entry in recent_logs %}
+                <div class="mini-entry">
+                    <span class="mini-ts">{{ entry.timestamp[-8:] }}</span>
+
+                    <span class="lvl lvl-{{ entry.level }}">
+                        {{ entry.level }}
+                    </span>
+
+                    {% if entry.parts %}
+                        <span class="mini-msg">
+                            {% if entry.level in ('CMD', 'CMND') %}
+                                <span class="mini-chip">
+                                    <i class="ti ti-user" style="font-size:11px;"></i>
+                                    {{ entry.parts.username }}
+                                </span>
+
+                                <span class="mini-sep">›</span>
+
+                                <span class="mini-chip mini-chip-cmd">
+                                    <i class="ti ti-terminal-2" style="font-size:11px;"></i>
+                                    {{ entry.parts.command }}
+                                </span>
+
+                            {% elif entry.level == 'EVAL' %}
+                                <span class="mini-chip">
+                                    <i class="ti ti-user" style="font-size:11px;"></i>
+                                    {{ entry.parts.username }}
+                                </span>
+
+                                <span class="mini-sep">›</span>
+
+                                <span class="mini-chip mini-chip-eval {{ 'mini-chip-error' if entry.parts.error }}">
+                                    <i class="ti ti-code" style="font-size:11px;"></i>
+                                    {{ entry.parts.code | truncate(38, true, '…') }}
+                                </span>
+
+                            {% elif entry.level == 'ERROR' %}
+                                <span class="mini-chip mini-chip-error">
+                                    <i class="ti ti-alert-triangle" style="font-size:11px;"></i>
+                                    {{ entry.parts.message | truncate(44, true, '…') }}
+                                </span>
+
+                            {% else %}
+                                {{ entry.message | truncate(55, true, '…') }}
+                            {% endif %}
+                        </span>
+                    {% else %}
+                        <span class="mini-msg">
+                            {{ entry.message | truncate(55, true, '…') }}
+                        </span>
+                    {% endif %}
+                </div>
+            {% else %}
+                <div class="empty-inline">
+                    <i
+                        class="ti ti-notes-off"
+                        style="display:block;font-size:22px;margin-bottom:8px;opacity:0.3;"
+                    ></i>
+
+                    No recent activity.
+                </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const startTime = Date.now();
+
+    function updateUptime() {
+        const s = Math.floor((Date.now() - startTime) / 1000);
+        const h = Math.floor(s / 3600);
+        const m = Math.floor((s % 3600) / 60);
+        const ss = s % 60;
+
+        const fmt = n => String(n).padStart(2, '0');
+
+        document.getElementById('uptimeVal').innerHTML =
+            `<code>${fmt(h)}:${fmt(m)}:${fmt(ss)}</code>`;
+    }
+
+    setInterval(updateUptime, 1000);
+    updateUptime();
+
+    const botId = {{ bot_id | tojson }};
+
+    if (botId && botId !== '—') {
+        fetch(`https://discord.com/api/v10/users/${botId}`, {
+            headers: {
+                'Authorization': 'Bot {{ discord_token }}'
+            }
+        })
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+            if (!data || !data.avatar) return;
+
+            const url =
+                `https://cdn.discordapp.com/avatars/${data.id}/${data.avatar}.png?size=128`;
+
+            const img = document.getElementById('botAvatar');
+            const fallback = document.getElementById('avatarFallback');
+
+            img.src = url;
+            img.style.display = '';
+            fallback.style.display = 'none';
+
+            const sidebarAvatar = document.querySelector('.bot-avatar img');
+
+            if (sidebarAvatar) {
+                sidebarAvatar.src = url;
+            }
+        })
+        .catch(() => {});
+    }
+</script>
+{% endblock %}
