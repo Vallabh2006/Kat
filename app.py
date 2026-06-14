@@ -1,11 +1,15 @@
-import discord, kat, os, logging, importlib, itertools, threading, socket, json, flask.cli, asyncio
-from cryptography.fernet import Fernet
+import discord, kat, os, io, logging, importlib, itertools, threading, socket, json, requests, flask.cli, secrets, asyncio
+from flask import session, Flask, render_template, redirect, send_file, jsonify, url_for, request as flask_request
+from rankcard import generate as generate_rankcard
 from discord.ext.commands import CommandNotFound
 from discord.ext import commands, tasks
+from cryptography.fernet import Fernet
 from dotenv import load_dotenv
 from datetime import datetime
-from flask import Flask, render_template
+from functools import wraps
 import regex as re
+
+bot_start_time = None
 
 load_dotenv()
 
@@ -47,6 +51,14 @@ _CONSOLE_ONLY = {
     "flask running at",
     "trying to connect",
 }
+
+def require_login(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if "user_id" not in session:
+            return redirect(url_for("login"))
+        return f(*args, **kwargs)
+    return decorated
 
 def _is_console_only(message: str) -> bool:
     low = message.lower()
@@ -125,10 +137,71 @@ def get_local_ip():
     return ip
 
 app = Flask(__name__)
+app.secret_key = os.getenv("FLASK_SECRET_KEY")
 app.logger.setLevel(logging.ERROR)
 flask.cli.show_server_banner = lambda *_: None
 
+DISCORD_API = "https://discord.com/api/v10"
+
+@app.route("/login")
+def login():
+    state = secrets.token_urlsafe(16)
+    session["oauth_state"] = state
+    params = {
+        "client_id":     os.getenv("DISCORD_CLIENT_ID"),
+        "redirect_uri":  os.getenv("DISCORD_REDIRECT_URI"),
+        "response_type": "code",
+        "scope":         "identify email guilds",
+        "state":         state,
+    }
+    from urllib.parse import urlencode
+    return redirect(f"https://discord.com/oauth2/authorize?{urlencode(params)}")
+
+@app.route("/auth/discord/redirect")
+def callback():
+    if flask_request.args.get("state") != session.get("oauth_state"):
+        return "State mismatch. Try again.", 400
+
+    code = flask_request.args.get("code")
+
+    token_resp = requests.post(f"{DISCORD_API}/oauth2/token", data={
+        "client_id":     os.getenv("DISCORD_CLIENT_ID"),
+        "client_secret": os.getenv("DISCORD_CLIENT_SECRET"),
+        "grant_type":    "authorization_code",
+        "code":          code,
+        "redirect_uri":  os.getenv("DISCORD_REDIRECT_URI"),
+    }, headers={"Content-Type": "application/x-www-form-urlencoded"})
+
+    token_data = token_resp.json()
+    access_token = token_data.get("access_token")
+
+    if not access_token:
+        return "OAuth failed.", 400
+
+    user_resp = requests.get(f"{DISCORD_API}/users/@me", headers={
+        "Authorization": f"Bearer {access_token}"
+    })
+    user = user_resp.json()
+
+    session["user_id"]   = user["id"]
+    session["username"]  = user["username"]
+    session["avatar"]    = user.get("avatar")
+
+    return redirect(url_for("home"))
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
+
+def format_uptime(start):
+    if not start:
+        return None
+    return int(start.timestamp() * 1000)
+
 @app.route("/")
+@require_login
 def home():
     all_logs      = read_logs()
     recent        = list(reversed(all_logs[-10:]))
@@ -148,9 +221,13 @@ def home():
         prefixes          = prefixes,
         port              = 8080,
         recent_logs       = recent,
+        uptime_ts         = int(bot_start_time.timestamp() * 1000) if bot_start_time else None,
+        discord_token     = os.getenv("TOKEN_KAT"),
+        session           = session,
     )
 
 @app.route("/logs")
+@require_login
 def logs_page():
     entries = read_logs()
     return render_template(
@@ -160,20 +237,129 @@ def logs_page():
         bot_ready  = bot.is_ready(),
         bot_name   = str(bot.user.name)           if bot.is_ready() else "Kat",
         bot_avatar = str(bot.user.display_avatar) if bot.is_ready() else None,
+        session    = session,
     )
 
-
 @app.route("/api/logs")
+@require_login
 def logs_api():
-    level  = flask.request.args.get("level", "").upper()
-    search = flask.request.args.get("search", "").lower()
+    level  = flask_request.args.get("level", "").upper()
+    search = flask_request.args.get("search", "").lower()
     entries = read_logs()
     if level:
         entries = [e for e in entries if e["level"] == level]
     if search:
         entries = [e for e in entries if search in e["message"].lower()]
-    return flask.jsonify(entries[::-1])
+    from flask import jsonify
+    return jsonify(entries[::-1])
 
+@app.route("/customize")
+@require_login
+def customize():
+    avatar_hash = session.get("avatar")
+    user_id     = session.get("user_id")
+    avatar_url  = f"https://cdn.discordapp.com/avatars/{user_id}/{avatar_hash}.png?size=256" if avatar_hash else "https://cdn.discordapp.com/embed/avatars/0.png"
+    return render_template(
+        "customize.html",
+        title        = "Customize Bot",
+        session      = session,
+        prev_username = session.get("username", "User"),
+        prev_avatar   = avatar_url,
+        prev_user_id  = user_id,
+    )
+
+@app.route("/rankcard")
+def rankcard():
+    args = flask_request.args
+
+    def boolarg(key, default=True):
+        val = args.get(key, None)
+        if val is None: return default
+        return val not in ("0", "false", "False", "no")
+
+    def colorarg(key):
+        val = args.get(key, None)
+        if not val:
+            return None
+        val = val.lstrip("#")
+        if len(val) != 6:
+            return None
+        try:
+            int(val, 16)
+            return val
+        except ValueError:
+            return None
+
+    try:
+        text_color = colorarg("text_main")
+        img_bytes = generate_rankcard(
+            username      = args.get("username", "User"),
+            discriminator = args.get("discriminator", ""),
+            avatar_url    = args.get("avatar", None),
+            level         = int(args.get("level", 1)),
+            xp            = int(args.get("xp", 0)),
+            xp_max        = int(args.get("xp_max", 100)),
+            rank          = int(args.get("rank")) if args.get("rank") else None,
+            bg            = colorarg("bg"),
+            accent        = colorarg("accent"),
+            border        = colorarg("border"),
+            panel         = colorarg("panel"),
+            text_main     = text_color,
+            text_sub      = text_color,
+            text_mono     = text_color,
+            card_style    = args.get("card_style"),
+            bar_style     = args.get("bar_style"),
+            rounded       = boolarg("rounded", False),
+            show_rank     = True,
+            show_level    = True,
+            show_xp       = True,
+            bg_image      = args.get("bg_image") or None,
+            bg_opacity    = float(args.get("bg_opacity", 0.3)),
+            bot_token     = os.getenv("TOKEN_KAT"),
+        )
+
+        return send_file(io.BytesIO(img_bytes), mimetype="image/png")
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    
+@app.route("/api/rankcard/config/<user_id>", methods=["GET"])
+@require_login
+def rankcard_config_get(user_id):
+    from rankcard import get_config
+    from flask import jsonify
+    return jsonify(get_config(user_id))
+
+@app.route("/api/rankcard/config/<user_id>", methods=["POST"])
+@require_login
+def rankcard_config_post(user_id):
+    from rankcard import save_config
+    from flask import jsonify
+    save_config(user_id, flask_request.json)
+    return jsonify({"ok": True})
+
+@app.route("/api/rankcard/config/<user_id>", methods=["DELETE"])
+@require_login
+def rankcard_config_delete(user_id):
+    from rankcard import delete_config
+    from flask import jsonify
+    delete_config(user_id)
+    return jsonify({"ok": True})
+
+@app.route("/api/avatar-proxy")
+@require_login
+def avatar_proxy():
+    from flask import Response
+    url = flask_request.args.get("url", "")
+    if not url.startswith("https://cdn.discordapp.com/"):
+        return "Blocked", 403
+    try:
+        r = requests.get(url, headers={
+            "User-Agent": "DiscordBot (RankCard, 1.0)",
+            "Authorization": f"Bot {os.getenv('TOKEN_KAT')}",
+        }, timeout=8)
+        return Response(r.content, content_type=r.headers.get("Content-Type", "image/png"))
+    except Exception as e:
+        return str(e), 500
 
 def run_flask():
     app.run(
@@ -203,7 +389,8 @@ async def change_status():
 
 @bot.event
 async def on_ready():
-    global status_cycle
+    global status_cycle, bot_start_time
+    bot_start_time = datetime.now()
     status_cycle = itertools.cycle(statuses)
     change_status.start()
     log("ready", f"{GREEN}Logged in as {bot.user}{RESET}")

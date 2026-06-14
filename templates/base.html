@@ -13,6 +13,7 @@
 
     {% block head %}{% endblock %}
 </head>
+
 <body>
 
     <div class="orb orb1"></div>
@@ -20,20 +21,29 @@
     <div class="orb orb3"></div>
 
     <aside class="sidebar" id="sidebar">
+
         <div class="sidebar-brand">
-            <div class="brand-icon">
-                <i class="ti ti-brand-discord"></i>
+            <div class="user-chip" id="userChip">
+                {% if session.avatar %}
+                    <img class="user-pfp" src="https://cdn.discordapp.com/avatars/{{ session.user_id }}/{{ session.avatar }}.png" alt="pfp" />
+                {% else %}
+                    <div class="user-pfp user-pfp--placeholder">
+                        <i class="ti ti-user"></i>
+                    </div>
+                {% endif %}
+                <span class="user-display-name">{{ session.username }}</span>
             </div>
-
-            <span class="brand-name">Kat</span>
-
-            <div class="brand-status {{ 'online' if bot_ready else 'offline' }}"></div>
         </div>
 
         <nav class="sidebar-nav">
             <a href="/" class="nav-item {{ 'active' if request.path == '/' else '' }}">
                 <i class="ti ti-layout-dashboard"></i>
                 <span>Dashboard</span>
+            </a>
+
+            <a href="/customize" class="nav-item {{ 'active' if request.path == '/customize' else '' }}">
+                <i class="ti ti-layout-dashboard"></i>
+                <span>Customize</span>
             </a>
 
             <a href="/logs" class="nav-item {{ 'active' if request.path == '/logs' else '' }}">
@@ -44,18 +54,9 @@
 
         <div class="sidebar-footer">
             <div class="bot-tag">
-                <div class="bot-avatar">
-                    {% if bot_avatar %}
-                        <img src="{{ bot_avatar }}" alt="Kat" />
-                    {% else %}
-                        <i class="ti ti-robot"></i>
-                    {% endif %}
-                </div>
-
-                <div class="bot-info">
-                    <span class="bot-name">{{ bot_name or 'Kat' }}</span>
-                    <span class="bot-disc">BOT</span>
-                </div>
+                <a href="/logout" class="user-popup-logout" style="width: 70%;">
+                    <i class="ti ti-logout"></i> Logout
+                </a>
             </div>
         </div>
     </aside>
@@ -69,7 +70,6 @@
             <div class="brand-icon sm">
                 <i class="ti ti-brand-discord"></i>
             </div>
-
             <span>Kat</span>
         </div>
     </header>
@@ -90,12 +90,14 @@
             overlay.classList.remove('visible');
         }
 
-        toggle?.addEventListener('click', () => {
+        toggle?.addEventListener('click', (e) => {
+            e.stopPropagation();
             sidebar.classList.toggle('open');
             overlay.classList.toggle('visible');
         });
 
         overlay?.addEventListener('click', closeSidebar);
+
     </script>
 
     {% block scripts %}{% endblock %}

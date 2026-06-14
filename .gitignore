@@ -9,3 +9,5 @@ logs/
 *.pyo
 *.pem
 *-key.pem
+
+*.json

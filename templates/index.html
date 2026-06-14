@@ -235,16 +235,18 @@
 
 {% block scripts %}
 <script>
-    const startTime = Date.now();
+    const botStartTs = {{ uptime_ts | tojson }};
 
     function updateUptime() {
-        const s = Math.floor((Date.now() - startTime) / 1000);
+        if (!botStartTs) {
+            document.getElementById('uptimeVal').innerHTML = '<code>—</code>';
+            return;
+        }
+        const s = Math.floor((Date.now() - botStartTs) / 1000);
         const h = Math.floor(s / 3600);
         const m = Math.floor((s % 3600) / 60);
         const ss = s % 60;
-
         const fmt = n => String(n).padStart(2, '0');
-
         document.getElementById('uptimeVal').innerHTML =
             `<code>${fmt(h)}:${fmt(m)}:${fmt(ss)}</code>`;
     }
@@ -253,32 +255,21 @@
     updateUptime();
 
     const botId = {{ bot_id | tojson }};
-
     if (botId && botId !== '—') {
         fetch(`https://discord.com/api/v10/users/${botId}`, {
-            headers: {
-                'Authorization': 'Bot {{ discord_token }}'
-            }
+            headers: { 'Authorization': 'Bot {{ discord_token }}' }
         })
         .then(r => r.ok ? r.json() : null)
         .then(data => {
             if (!data || !data.avatar) return;
-
-            const url =
-                `https://cdn.discordapp.com/avatars/${data.id}/${data.avatar}.png?size=128`;
-
+            const url = `https://cdn.discordapp.com/avatars/${data.id}/${data.avatar}.png?size=128`;
             const img = document.getElementById('botAvatar');
             const fallback = document.getElementById('avatarFallback');
-
             img.src = url;
             img.style.display = '';
             fallback.style.display = 'none';
-
             const sidebarAvatar = document.querySelector('.bot-avatar img');
-
-            if (sidebarAvatar) {
-                sidebarAvatar.src = url;
-            }
+            if (sidebarAvatar) sidebarAvatar.src = url;
         })
         .catch(() => {});
     }

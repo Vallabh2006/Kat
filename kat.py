@@ -1,4 +1,5 @@
 import discord, asyncio, io, aiohttp, os, re, psycopg2, json, dotenv
+from rankcard import generate, get_config
 from datetime import datetime
 
 db_host = os.getenv("DB_HOST")
@@ -283,8 +284,14 @@ async def sendEmbedMessage(
         if thumbnail:
             embed.set_thumbnail(url=handle_media(thumbnail))
 
+        file = None
+        
         if image:
-            embed.set_image(url=handle_media(image))
+            if isinstance(image, discord.File):
+                embed.set_image(url=f"attachment://{image.filename}")
+                file = image
+            else:
+                embed.set_image(url=handle_media(image))
 
         if not any([
             embed.title,
@@ -297,6 +304,9 @@ async def sendEmbedMessage(
 
     if not content and not embed:
         content = "\u200b"
+
+    if file:
+        files.append(file)
 
     msg = await channel.send(
         content=content,
@@ -731,3 +741,39 @@ async def modifyUserRole(ctx, user_id, role_id, grant=True, guild_id=None):
         await member.remove_roles(role, reason=f"Role removed via command by {ctx.author}")
     else:
         raise ValueError(f"Invalid grant '{grant}'. To grant role use grant parameter as True, vice versa")
+    
+async def getRankcard(ctx, user_id, guild_id=None):
+    from rankcard import generate, get_config
+    import io, discord
+
+    if guild_id is None:
+        guild_id = ctx.guild.id if ctx.guild else None
+
+    try:
+        user = await ctx.bot.fetch_user(int(user_id))
+        username   = user.name
+        avatar_url = str(user.display_avatar.url)
+    except Exception:
+        username   = str(user_id)
+        avatar_url = None
+
+    cfg = get_config(str(user_id))
+
+    level  = 4
+    xp     = 23
+    xp_max = 250
+    rank   = 1
+
+    img_bytes = generate(
+        username   = username,
+        avatar_url = avatar_url,
+        level      = level,
+        xp         = xp,
+        xp_max     = xp_max,
+        rank       = rank,
+        **cfg,
+    )
+
+    buf = io.BytesIO(img_bytes)
+    buf.seek(0)
+    return discord.File(buf, filename=f"{username}_rankcard.png")

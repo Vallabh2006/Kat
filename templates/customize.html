@@ -1,0 +1,351 @@
+{% extends "base.html" %}
+{% block title %}Rank Card{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>Rank Card</h1>
+        <p>Customize the default rank card for any member</p>
+    </div>
+</div>
+
+<style>
+
+@media (max-width: 768px) {
+    #rankcard-grid {
+        grid-template-columns: 1fr !important;
+    }
+}
+
+</style>
+
+<div style="display:grid; grid-template-columns: 1fr 1.6fr; gap: 18px;" id="rankcard-grid">
+
+    <!-- LEFT: controls -->
+    <div class="dash-card glass" style="padding: 0; overflow: hidden;">
+        <div class="dash-card-head">
+            <span>Card Settings</span>
+            <span class="dash-card-badge badge-info" id="saveStatus" style="display:none;">Saved</span>
+        </div>
+
+        <div style="padding: 18px; display: flex; flex-direction: column; gap: 14px;">
+
+            <!-- colours -->
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                <div class="form-group" style="margin:0;">
+                    <label>Background</label>
+                    <div style="display:flex; gap:6px; align-items:center;">
+                        <input type="color" id="c_bg" value="#111214" class="color-swatch" />
+                        <input type="text"  id="t_bg" value="111214"  class="color-text" />
+                    </div>
+                </div>
+                <div class="form-group" style="margin:0;">
+                    <label>Accent / Bar</label>
+                    <div style="display:flex; gap:6px; align-items:center;">
+                        <input type="color" id="c_accent" value="#f0b429" class="color-swatch" />
+                        <input type="text"  id="t_accent" value="f0b429"  class="color-text" />
+                    </div>
+                </div>
+                <div class="form-group" style="margin:0;">
+                    <label>Border</label>
+                    <div style="display:flex; gap:6px; align-items:center;">
+                        <input type="color" id="c_border" value="#2a2d31" class="color-swatch" />
+                        <input type="text"  id="t_border" value="2a2d31"  class="color-text" />
+                    </div>
+                </div>
+                <div class="form-group" style="margin:0;">
+                    <label>Text</label>
+                    <div style="display:flex; gap:6px; align-items:center;">
+                        <input type="color" id="c_text_main" value="#ffffff" class="color-swatch" />
+                        <input type="text"  id="t_text_main" value="ffffff"  class="color-text" />
+                    </div>
+                </div>
+            </div>
+
+            <hr style="margin: 4px 0;" />
+
+            <!-- rounded toggle only -->
+            <div style="display:flex; flex-direction:column; gap:8px;">
+                <label style="margin:0; display:flex; align-items:center; gap:10px; cursor:pointer;">
+                    <input type="checkbox" id="rounded" class="toggle-check" />
+                    <span style="font-size:13px; color:var(--txt-2);">Rounded (corners + circle avatar)</span>
+                </label>
+            </div>
+
+            <!-- bg image -->
+            <div class="form-group" style="margin:0;">
+                <label>Background Image URL <small>(optional)</small></label>
+                <input type="text" id="bg_image" placeholder="https://..." />
+            </div>
+            <div class="form-group" style="margin:0;">
+                <label>Background Opacity <span id="opacityVal">0.30</span></label>
+                <input type="range" id="bg_opacity" min="0" max="1" step="0.05" value="0.3"
+                       style="width:100%; accent-color:var(--accent);" />
+            </div>
+
+            <hr style="margin: 4px 0;" />
+
+            <div style="display:flex; gap:8px;">
+                <button class="btn btn-primary" style="flex:1;" onclick="saveConfig()">
+                    <i class="ti ti-device-floppy"></i> Save
+                </button>
+                <button class="btn btn-ghost" onclick="resetConfig()" title="Reset to defaults">
+                    <i class="ti ti-refresh"></i>
+                </button>
+                <button class="btn btn-danger btn-sm" onclick="deleteConfig()" title="Delete custom config">
+                    <i class="ti ti-trash"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- RIGHT: preview -->
+    <div style="display:flex; flex-direction:column; gap:14px;">
+        <div class="dash-card glass" style="padding:0; overflow:hidden;">
+            <div class="dash-card-head">
+                <span>Live Preview</span>
+                <button class="btn btn-ghost btn-sm" onclick="refreshPreview()">
+                    <i class="ti ti-refresh"></i> Refresh
+                </button>
+            </div>
+            <div style="padding:20px; display:flex; flex-direction:column; gap:12px; align-items:center;">
+                <div id="previewWrap" style="width:100%; border-radius:10px; overflow:hidden; border:0.5px solid var(--border); min-height:80px; display:flex; align-items:center; justify-content:center;">
+                    <img id="previewImg" src="" alt="preview"
+                         style="width:100%; display:none; border-radius:10px;" />
+                    <div id="previewLoading" style="color:var(--txt-3); font-size:13px;">
+                        <i class="ti ti-photo" style="font-size:22px; display:block; margin:0 auto 8px; opacity:0.3;"></i>
+                        Click Refresh to preview
+                    </div>
+                </div>
+
+                <!-- user identity (read-only, from session) -->
+                <div style="display:flex; align-items:center; gap:12px; width:100%; padding:10px 12px; background:var(--bg-2,rgba(255,255,255,0.04)); border-radius:8px; border:0.5px solid var(--border);">
+                    <img id="prev_avatar_img" src="{{ prev_avatar }}"
+                         style="width:36px;height:36px;border-radius:50%;object-fit:cover;flex-shrink:0;"
+                         onerror="this.src='https://cdn.discordapp.com/embed/avatars/0.png'" />
+                    <div>
+                        <div style="font-size:14px;font-weight:600;color:var(--txt-1);">{{ prev_username }}</div>
+                        <div style="font-size:11px;color:var(--txt-3);">Previewing as you · <a href="#" onclick="loadMyXP(); return false;" style="color:var(--accent);text-decoration:none;">load my XP</a></div>
+                    </div>
+                    <!-- hidden fields JS reads -->
+                    <input type="hidden" id="prev_username" value="{{ prev_username }}" />
+                    <input type="hidden" id="prev_avatar"   value="{{ prev_avatar }}" />
+                    <input type="hidden" id="prev_user_id"  value="{{ prev_user_id }}" />
+                </div>
+
+                <div style="display:flex; gap:8px; width:100%;">
+                    <div class="form-group" style="margin:0; flex:1;">
+                        <label>XP</label>
+                        <input type="number" id="prev_xp" value="3200" min="0" />
+                    </div>
+                    <div class="form-group" style="margin:0; flex:1;">
+                        <label>XP Max</label>
+                        <input type="number" id="prev_xp_max" value="5000" min="1" />
+                    </div>
+                    <div class="form-group" style="margin:0; width:80px;">
+                        <label>Level</label>
+                        <input type="number" id="prev_level" value="1" min="1" />
+                    </div>
+                    <div class="form-group" style="margin:0; width:80px;">
+                        <label>Rank</label>
+                        <input type="number" id="prev_rank" value="1" min="1" />
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- API URL box -->
+        <div class="dash-card glass" style="padding:0; overflow:hidden;">
+            <div class="dash-card-head"><span>API URL</span></div>
+            <div style="padding:16px;">
+                <pre id="apiUrl" style="font-size:11px; word-break:break-all; white-space:pre-wrap; margin:0; background:none; border:none; padding:0; color:var(--txt-2);">—</pre>
+                <button class="btn btn-ghost btn-sm mt-1" onclick="copyUrl()">
+                    <i class="ti ti-copy"></i> Copy URL
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.color-swatch {
+    width: 34px; height: 34px;
+    border: 0.5px solid var(--border);
+    border-radius: 6px;
+    padding: 2px;
+    background: none;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.color-text {
+    width: 90px !important;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px !important;
+}
+.toggle-check {
+    width: 16px; height: 16px;
+    accent-color: var(--accent);
+    cursor: pointer;
+}
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const BASE = window.location.origin;
+
+// ── colour sync ───────────────────────────────────────────────────────────────
+const colorPairs = [
+    ['c_bg','t_bg'], ['c_accent','t_accent'], ['c_border','t_border'],
+    ['c_text_main','t_text_main'],
+];
+colorPairs.forEach(([cid, tid]) => {
+    const cp = document.getElementById(cid);
+    const tp = document.getElementById(tid);
+    cp.addEventListener('input', () => { tp.value = cp.value.replace('#',''); });
+    tp.addEventListener('input', () => {
+        if (/^[0-9a-fA-F]{6}$/.test(tp.value)) cp.value = '#' + tp.value;
+    });
+});
+
+document.getElementById('bg_opacity').addEventListener('input', e => {
+    document.getElementById('opacityVal').textContent = parseFloat(e.target.value).toFixed(2);
+});
+
+// ── collect current form state ────────────────────────────────────────────────
+function getFormConfig() {
+    const textColor = document.getElementById('t_text_main').value;
+    return {
+        bg:         document.getElementById('t_bg').value,
+        accent:     document.getElementById('t_accent').value,
+        border:     document.getElementById('t_border').value,
+        text_main:  textColor,
+        text_sub:   textColor,
+        text_mono:  textColor,
+        rounded:    document.getElementById('rounded').checked,
+        bg_image:   document.getElementById('bg_image').value || null,
+        bg_opacity: parseFloat(document.getElementById('bg_opacity').value),
+    };
+}
+
+function applyConfig(cfg) {
+    const set = (tid, cid, val) => {
+        document.getElementById(tid).value = val;
+        document.getElementById(cid).value = '#' + val;
+    };
+    set('t_bg',        'c_bg',        cfg.bg        || '111214');
+    set('t_accent',    'c_accent',    cfg.accent     || 'f0b429');
+    set('t_border',    'c_border',    cfg.border     || '2a2d31');
+    set('t_text_main', 'c_text_main', cfg.text_main  || cfg.text_sub || cfg.text_mono || 'ffffff');
+    document.getElementById('rounded').checked = !!cfg.rounded;
+    document.getElementById('bg_image').value  = cfg.bg_image || '';
+    const op = cfg.bg_opacity ?? 0.3;
+    document.getElementById('bg_opacity').value = op;
+    document.getElementById('opacityVal').textContent = op.toFixed(2);
+}
+
+// ── build preview/API URL ─────────────────────────────────────────────────────
+function buildParams(cfg, forDisplay = false) {
+    const av = document.getElementById('prev_avatar').value;
+    const p = new URLSearchParams({
+        username:   document.getElementById('prev_username').value || 'User',
+        level:      document.getElementById('prev_level').value    || 1,
+        xp:         document.getElementById('prev_xp').value       || 0,
+        xp_max:     document.getElementById('prev_xp_max').value   || 100,
+        rank:       document.getElementById('prev_rank').value     || '',
+        bg:         cfg.bg,
+        accent:     cfg.accent,
+        border:     cfg.border,
+        text_main:  cfg.text_main,
+        text_sub:   cfg.text_sub,
+        text_mono:  cfg.text_mono,
+        // Pass rounded as 1/0 string — server uses `not in ("0","false","no")`
+        rounded:    cfg.rounded ? '1' : '0',
+        bg_opacity: cfg.bg_opacity,
+    });
+    // Pass the raw Discord CDN URL — the server fetches it with the bot token
+    if (av) p.set('avatar', av);
+    if (cfg.bg_image) p.set('bg_image', cfg.bg_image);
+    if (!forDisplay) p.set('_t', Date.now()); // cache-bust for preview only
+    return p;
+}
+
+function refreshPreview() {
+    const cfg = getFormConfig();
+    const p   = buildParams(cfg);
+    const url = `${BASE}/rankcard?${p.toString()}`;
+
+    const img = document.getElementById('previewImg');
+    const ldr = document.getElementById('previewLoading');
+    ldr.style.display = '';
+    ldr.innerHTML = '<i class="ti ti-loader-2" style="font-size:22px;display:block;margin:0 auto 8px;opacity:0.5;animation:spin 1s linear infinite;"></i>Loading…';
+    img.style.display = 'none';
+    img.src = url;
+    img.onload  = () => { img.style.display='block'; ldr.style.display='none'; };
+    img.onerror = () => { ldr.innerHTML='<span style="color:var(--red)">Failed to load preview</span>'; };
+
+    // Clean display URL (no cache-bust timestamp)
+    const cleanP = buildParams(cfg, true);
+    document.getElementById('apiUrl').textContent = `${BASE}/rankcard?${cleanP.toString()}`;
+}
+
+function copyUrl() {
+    const url = document.getElementById('apiUrl').textContent;
+    navigator.clipboard.writeText(url);
+    const btn = event.target.closest('button');
+    btn.innerHTML = '<i class="ti ti-check"></i> Copied!';
+    setTimeout(() => btn.innerHTML = '<i class="ti ti-copy"></i> Copy URL', 1500);
+}
+
+// ── save / load / reset / delete ─────────────────────────────────────────────
+async function saveConfig() {
+    const uid = document.getElementById('prev_user_id').value || 'default';
+    const cfg = getFormConfig();
+    const res = await fetch(`/api/rankcard/config/${uid}`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(cfg),
+    });
+    if (res.ok) {
+        const s = document.getElementById('saveStatus');
+        s.style.display = '';
+        setTimeout(() => s.style.display='none', 2000);
+    }
+}
+
+async function loadMyXP() {
+    const uid = document.getElementById('prev_user_id').value;
+    if (!uid) return;
+    const res = await fetch(`/api/rankcard/config/${uid}`);
+    if (res.ok) {
+        const cfg = await res.json();
+        applyConfig(cfg);
+        refreshPreview();
+    }
+}
+
+function resetConfig() { applyConfig({}); }
+
+async function deleteConfig() {
+    const uid = document.getElementById('prev_user_id').value;
+    if (!uid) return;
+    if (!confirm('Reset your card to server defaults?')) return;
+    await fetch(`/api/rankcard/config/${uid}`, { method: 'DELETE' });
+    resetConfig();
+}
+
+const style = document.createElement('style');
+style.textContent = '@keyframes spin { to { transform: rotate(360deg); } }';
+document.head.appendChild(style);
+
+// Auto-load saved config on page open
+(async () => {
+    const uid = document.getElementById('prev_user_id').value;
+    if (!uid) return;
+    try {
+        const res = await fetch(`/api/rankcard/config/${uid}`);
+        if (res.ok) { applyConfig(await res.json()); }
+    } catch {}
+})();
+</script>
+{% endblock %}
