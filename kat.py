@@ -1,6 +1,8 @@
 import discord, asyncio, io, aiohttp, os, re, psycopg2, json, dotenv
-from rankcard import generate, get_config
+from rankcard import generate, getRankcard as fetchRankcardCfg
 from datetime import datetime
+
+dotenv.load_dotenv()
 
 db_host = os.getenv("DB_HOST")
 db_user = os.getenv("DB_USER")
@@ -46,82 +48,306 @@ async def _get_channel(ctx, channel_id):
         return ctx.bot.get_channel(int(channel_id)) or await ctx.bot.fetch_channel(int(channel_id))
     return ctx.channel
 
-async def setServerVar(ctx, name, guild_id=None, value=None):
+async def _getUserRank(ctx, user_id, guild_id):
+    
+    conn = psycopg2.connect(host=db_host, dbname=db_name, user=db_user, password=db_pass, port=db_port)
+    cur  = conn.cursor()
+
+    try:
+        cur.execute("SELECT value FROM user_var WHERE name = %s", ("level",))
+        level_row = cur.fetchone()
+
+        cur.execute("SELECT value FROM user_var WHERE name = %s", ("xp",))
+        xp_row = cur.fetchone()
+
+        if level_row is None:
+            return None
+
+        level_data = level_row[0]
+        if isinstance(level_data, str):
+            level_data = json.loads(level_data)
+
+        xp_data = xp_row[0] if xp_row else {}
+        if isinstance(xp_data, str):
+            xp_data = json.loads(xp_data)
+
+        guildid = str(guild_id)
+        userid  = str(user_id)
+
+        scores = {}
+        for uid, guild_data in level_data.items():
+            if isinstance(guild_data, dict) and guildid in guild_data:
+                lvl = int(guild_data[guildid] or 1)
+                xp  = int((xp_data.get(uid, {}) or {}).get(guildid, 0))
+                scores[uid] = (lvl, xp)
+
+        if userid not in scores:
+            return None
+
+        user_score = scores[userid]
+        rank = sum(1 for s in scores.values() if s > user_score) + 1
+        return rank
+
+    finally:
+        cur.close()
+        conn.close()
+
+async def setServerVar(ctx, name, value=None, guild_id=None,):
 
     conn = psycopg2.connect(host=db_host, dbname=db_name, user=db_user, password=db_pass, port=db_port)
     cur = conn.cursor()
 
-    if not guild_id:
-        guildid = int((await _get_guild(ctx)).id)
-    else:
-        guildid = int(guild_id)
-
-    if not value:
-        value = ""
-
-    cur.execute(
-        "SELECT value FROM server_var WHERE name = %s",
-        (name,)
-    )
-
-    row = cur.fetchone()
-
-    if row is None:
-
-        data = {str(guildid): value}
-        cur.execute(
-            "INSERT INTO server_var (name, value) VALUES (%s, %s)",
-            (name, json.dumps(data))
-        )
-    else:
-        data = row[0]
-        if isinstance(data, str):
-            data = json.loads(data)
-
-        data[str(guildid)] = value
+    try:
+        if not guild_id:
+            guildid = int((await _get_guild(ctx)).id)
+        else:
+            guildid = int(guild_id)
 
         cur.execute(
-            """
-            UPDATE server_var
-            SET value = %s
-            WHERE name = %s
-            """,
-            (json.dumps(data), name)
+            "SELECT value FROM server_var WHERE name = %s",
+            (name,)
         )
 
-    conn.commit()
-    cur.close()
-    conn.close()
-    return True
+        row = cur.fetchone()
+
+        if not value:
+
+            if row is not None:
+                data = row[0]
+                if isinstance(data, str):
+                    data = json.loads(data)
+
+                data.pop(str(guildid), None)
+
+
+                cur.execute(
+                "UPDATE server_var SET value = %s WHERE name = %s",
+                    (json.dumps(data), name)
+                )
+
+
+        else:
+            if row is None:
+                data = {str(guildid): value}
+                cur.execute(
+                    "INSERT INTO server_var (name, value) VALUES (%s, %s)",
+                    (name, json.dumps(data))
+                )
+            else:
+                data = row[0]
+                if isinstance(data, str):
+                    data = json.loads(data)
+
+                data[str(guildid)] = value
+
+                cur.execute(
+                    "UPDATE server_var SET value = %s WHERE name = %s",
+                    (json.dumps(data), name)
+                )
+
+        conn.commit()
+        return True
+
+    finally:
+        cur.close()
+        conn.close()
 
 async def getServerVar(ctx, name, guild_id=None):
 
     conn = psycopg2.connect(host=db_host, dbname=db_name, user=db_user, password=db_pass, port=db_port)
     cur = conn.cursor()
 
-    if not guild_id:
-        guildid = int((await _get_guild(ctx)).id)
-    else:
-        guildid = int(guild_id)
+    try:
+        if not guild_id:
+            guildid = str(int((await _get_guild(ctx)).id))
+        else:
+            guildid = str(int(guild_id))
 
-    cur.execute(
-        "SELECT value FROM server_var WHERE name = %s",
-        (name,)
-    )
+        cur.execute(
+            "SELECT value FROM server_var WHERE name = %s",
+            (name,)
+        )
 
-    row = cur.fetchone()
+        row = cur.fetchone()
 
-    cur.close()
-    conn.close()
+        if row is None:
+            return None
 
-    if row is None:
-        return None
+        data = row[0]
+        if isinstance(data, str):
+            data = json.loads(data)
 
-    data = row[0]
-    if isinstance(data, str):
-        data = json.loads(data)
+        return data.get(guildid)
 
-    return data.get(str(guildid))
+    finally:
+        cur.close()
+        conn.close()
+
+async def setUserVar(ctx, name, value=None, guild_id=None,  user_id=None):
+
+    conn = psycopg2.connect(host=db_host, dbname=db_name, user=db_user, password=db_pass, port=db_port)
+    cur = conn.cursor()
+
+    try:
+        if not guild_id:
+            guildid = str(int((await _get_guild(ctx)).id))
+        else:
+            guildid = str(int(guild_id))
+
+        if not user_id:
+            userid = str(int(ctx.author.id))
+        else:
+            userid = str(int(user_id))
+
+        cur.execute(
+            "SELECT value FROM user_var WHERE name = %s",
+            (name,)
+        )
+
+        row = cur.fetchone()
+
+        if not value:
+
+            if row is not None:
+                data = row[0]
+                if isinstance(data, str):
+                    data = json.loads(data)
+
+                if userid in data:
+                    data[userid].pop(guildid, None)
+
+                    if not data[userid]:
+                        del data[userid]
+
+                cur.execute(
+                    "UPDATE user_var SET value = %s WHERE name = %s",
+                    (json.dumps(data), name)
+                )
+
+        else:
+            if row is None:
+                data = {userid: {guildid: value}}
+                cur.execute(
+                    "INSERT INTO user_var (name, value) VALUES (%s, %s)",
+                    (name, json.dumps(data))
+                )
+            else:
+                data = row[0]
+                if isinstance(data, str):
+                    data = json.loads(data)
+
+                if userid not in data:
+                    data[userid] = {}
+
+                data[userid][guildid] = value
+
+                cur.execute(
+                    "UPDATE user_var SET value = %s WHERE name = %s",
+                    (json.dumps(data), name)
+                )
+
+        conn.commit()
+        return True
+
+    finally:
+        cur.close()
+        conn.close()
+
+async def getUserVar(ctx, name, user_id=None, guild_id=None):
+
+    conn = psycopg2.connect(host=db_host, dbname=db_name, user=db_user, password=db_pass, port=db_port)
+    cur = conn.cursor()
+
+    try:
+        if not guild_id:
+            guildid = str(int((await _get_guild(ctx)).id))
+        else:
+            guildid = str(int(guild_id))
+
+        if not user_id:
+            userid = str(int(ctx.author.id))
+        else:
+            userid = str(int(user_id))
+
+        cur.execute(
+            "SELECT value FROM user_var WHERE name = %s",
+            (name,)
+        )
+
+        row = cur.fetchone()
+
+        if row is None:
+            return None
+
+        data = row[0]
+        if isinstance(data, str):
+            data = json.loads(data)
+
+        return data.get(userid, {}).get(guildid)
+
+    finally:
+        cur.close()
+        conn.close()
+
+async def setVar(name, value=None):
+
+    conn = psycopg2.connect(host=db_host, dbname=db_name, user=db_user, password=db_pass, port=db_port)
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            "SELECT value FROM global_var WHERE name = %s",
+            (name,)
+        )
+
+        row = cur.fetchone()
+
+        if not value:
+            if row is not None:
+                cur.execute(
+                    "UPDATE global_var SET value = NULL WHERE name = %s",
+                    (name,)
+                )
+        else:
+            if row is None:
+                cur.execute(
+                    "INSERT INTO global_var (name, value) VALUES (%s, %s)",
+                    (name, value)
+                )
+            else:
+                cur.execute(
+                    "UPDATE global_var SET value = %s WHERE name = %s",
+                    (value, name)
+                )
+
+        conn.commit()
+        return True
+
+    finally:
+        cur.close()
+        conn.close()
+
+async def getVar(name):
+
+    conn = psycopg2.connect(host=db_host, dbname=db_name, user=db_user, password=db_pass, port=db_port)
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            "SELECT value FROM global_var WHERE name = %s",
+            (name,)
+        )
+
+        row = cur.fetchone()
+
+        if row is None:
+            return None
+
+        return row[0]
+
+    finally:
+        cur.close()
+        conn.close()
 
 async def sendMessage(ctx, content, channel_id=None):
     channel = await _get_channel(ctx, channel_id)
@@ -741,28 +967,47 @@ async def modifyUserRole(ctx, user_id, role_id, grant=True, guild_id=None):
         await member.remove_roles(role, reason=f"Role removed via command by {ctx.author}")
     else:
         raise ValueError(f"Invalid grant '{grant}'. To grant role use grant parameter as True, vice versa")
-    
-async def getRankcard(ctx, user_id, guild_id=None):
-    from rankcard import generate, get_config
-    import io, discord
+
+async def getUserRankcard(ctx, user_id, guild_id=None):
 
     if guild_id is None:
         guild_id = ctx.guild.id if ctx.guild else None
 
     try:
-        user = await ctx.bot.fetch_user(int(user_id))
-        username   = user.name
-        avatar_url = str(user.display_avatar.url)
+        guild  = await ctx.bot.fetch_guild(int(guild_id)) if guild_id else None
+        member = None
+
+        if guild:
+            try:
+                member = await guild.fetch_member(int(user_id))
+            except discord.NotFound:
+                pass
+
+        if member:
+            username   = member.nick or member.display_name
+            avatar_url = str(member.display_avatar.url)
+        else:
+            user       = await ctx.bot.fetch_user(int(user_id))
+            username   = user.display_name
+            avatar_url = str(user.display_avatar.url)
+
     except Exception:
         username   = str(user_id)
         avatar_url = None
 
-    cfg = get_config(str(user_id))
+    cfg    = await fetchRankcardCfg(user_id)
+    xp     = int(await getUserVar(ctx, "xp",     user_id=user_id, guild_id=guild_id) or 0)
+    level  = int(await getUserVar(ctx, "level",  user_id=user_id, guild_id=guild_id) or 1)
+    xp_max = int(await getUserVar(ctx, "xp_max", user_id=user_id, guild_id=guild_id) or 100)
 
-    level  = 4
-    xp     = 23
-    xp_max = 250
-    rank   = 1
+
+
+
+
+    rank = await _getUserRank(ctx, user_id, guild_id) or None
+
+
+
 
     img_bytes = generate(
         username   = username,

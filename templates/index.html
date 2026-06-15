@@ -101,7 +101,7 @@
 
                 <div class="identity-id">
                     <i class="ti ti-hash"></i>
-                    <span id="botId">{{ bot_id or '—' }}</span>
+                    <span id="botId">{{ bot_id or '-' }}</span>
                 </div>
             </div>
         </div>
@@ -149,7 +149,7 @@
                 </span>
 
                 <span class="meta-val" id="uptimeVal">
-                    <code>—</code>
+                    <code>-</code>
                 </span>
             </div>
         </div>
@@ -239,7 +239,7 @@
 
     function updateUptime() {
         if (!botStartTs) {
-            document.getElementById('uptimeVal').innerHTML = '<code>—</code>';
+            document.getElementById('uptimeVal').innerHTML = '<code>-</code>';
             return;
         }
         const s = Math.floor((Date.now() - botStartTs) / 1000);
@@ -255,7 +255,7 @@
     updateUptime();
 
     const botId = {{ bot_id | tojson }};
-    if (botId && botId !== '—') {
+    if (botId && botId !== '-') {
         fetch(`https://discord.com/api/v10/users/${botId}`, {
             headers: { 'Authorization': 'Bot {{ discord_token }}' }
         })

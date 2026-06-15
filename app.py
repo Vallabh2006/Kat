@@ -1,22 +1,38 @@
-import discord, kat, os, io, logging, importlib, itertools, threading, socket, json, requests, flask.cli, secrets, asyncio
-from flask import session, Flask, render_template, redirect, send_file, jsonify, url_for, request as flask_request
-from rankcard import generate as generate_rankcard
+import discord, kat, os, io, logging, importlib, itertools, threading, socket, json, requests, flask.cli, secrets, asyncio, random, regex as re
+from flask import session, Flask, render_template, redirect, send_file, jsonify, url_for, Response, request as flask_request
+from rankcard import generate as generate_rankcard, setRankcard, getRankcard, deleteRankcard
 from discord.ext.commands import CommandNotFound
 from discord.ext import commands, tasks
 from cryptography.fernet import Fernet
+from urllib.parse import urlencode
 from dotenv import load_dotenv
 from datetime import datetime
 from functools import wraps
-import regex as re
 
 bot_start_time = None
 
 load_dotenv()
 
+TOKEN = os.getenv("TOKEN_KAT")
+
 prefixes   = json.loads(os.getenv("PREFIXES"))
 owner_id   = os.getenv("BOT_OWNER_ID")
 dev_id     = os.getenv("BOT_DEV_ID")
 fernet     = Fernet(os.getenv("LOG_KEY").encode())
+
+DISCORD_API = "https://discord.com/api/v10"
+
+xp_cooldowns = {}
+XP_COOLDOWN  = 10
+XP_WEIGHTS   = [4, 2, 1]
+
+xp_limits  = json.loads(os.getenv("XP_LIMITS"))
+MAX_LEVEL  = len(xp_limits)
+
+intents = discord.Intents.default()
+intents.message_content = True
+
+bot = commands.Bot(command_prefix=prefixes, intents=intents)
 
 os.makedirs("logs", exist_ok=True)
 
@@ -25,21 +41,11 @@ statuses = [
     discord.CustomActivity(name=os.getenv("STATUS_2")),
 ]
 
-RESET        = "\033[0m"
-BOLD         = "\033[1m"
-DIM          = "\033[2m"
-RED          = "\033[91m"
-GREEN        = "\033[92m"
-YELLOW       = "\033[93m"
-BLUE         = "\033[94m"
-CYAN         = "\033[96m"
-WHITE        = "\033[97m"
-BLACK        = "\033[30m"
-BG_RED       = "\033[41m"
-BG_GREEN     = "\033[42m"
-BG_YELLOW    = "\033[43m"
-BG_BLUE      = "\033[44m"
-BG_DARK_RED  = "\033[48;5;88m"
+RESET        = "\033[0m" ; BOLD         = "\033[1m" ; DIM          = "\033[2m"
+RED          = "\033[91m"; GREEN        = "\033[92m"; YELLOW       = "\033[93m"
+BLUE         = "\033[94m"; CYAN         = "\033[96m"; WHITE        = "\033[97m"
+BLACK        = "\033[30m"; BG_RED       = "\033[41m"; BG_GREEN     = "\033[42m"
+BG_YELLOW    = "\033[43m"; BG_BLUE      = "\033[44m"; BG_DARK_RED  = "\033[48;5;88m"
 BG_DARK_BLUE = "\033[48;5;18m"
 
 logging.basicConfig(level=logging.WARNING)
@@ -141,8 +147,6 @@ app.secret_key = os.getenv("FLASK_SECRET_KEY")
 app.logger.setLevel(logging.ERROR)
 flask.cli.show_server_banner = lambda *_: None
 
-DISCORD_API = "https://discord.com/api/v10"
-
 @app.route("/login")
 def login():
     state = secrets.token_urlsafe(16)
@@ -154,7 +158,6 @@ def login():
         "scope":         "identify email guilds",
         "state":         state,
     }
-    from urllib.parse import urlencode
     return redirect(f"https://discord.com/oauth2/authorize?{urlencode(params)}")
 
 @app.route("/auth/discord/redirect")
@@ -172,7 +175,7 @@ def callback():
         "redirect_uri":  os.getenv("DISCORD_REDIRECT_URI"),
     }, headers={"Content-Type": "application/x-www-form-urlencoded"})
 
-    token_data = token_resp.json()
+    token_data  = token_resp.json()
     access_token = token_data.get("access_token")
 
     if not access_token:
@@ -183,26 +186,22 @@ def callback():
     })
     user = user_resp.json()
 
-    session["user_id"]   = user["id"]
-    session["username"]  = user["username"]
-    session["avatar"]    = user.get("avatar")
+    session["user_id"]  = user["id"]
+    session["username"] = user["username"]
+    session["avatar"]   = user.get("avatar")
 
     return redirect(url_for("home"))
 
 @app.route("/logout")
 def logout():
+
     session.clear()
     return redirect(url_for("login"))
-
-
-def format_uptime(start):
-    if not start:
-        return None
-    return int(start.timestamp() * 1000)
 
 @app.route("/")
 @require_login
 def home():
+
     all_logs      = read_logs()
     recent        = list(reversed(all_logs[-10:]))
     command_count = sum(1 for e in all_logs if e.get("level") in ("CMD", "CMND"))
@@ -213,7 +212,7 @@ def home():
         bot_name          = str(bot.user.name)           if bot.is_ready() else "Kat",
         bot_avatar        = str(bot.user.display_avatar) if bot.is_ready() else None,
         bot_discriminator = str(bot.user.discriminator)  if bot.is_ready() else "0000",
-        bot_id            = str(bot.user.id)             if bot.is_ready() else "—",
+        bot_id            = str(bot.user.id)             if bot.is_ready() else "-",
         guild_count       = len(bot.guilds)              if bot.is_ready() else 0,
         user_count        = sum(g.member_count or 0 for g in bot.guilds) if bot.is_ready() else 0,
         command_count     = command_count,
@@ -222,13 +221,14 @@ def home():
         port              = 8080,
         recent_logs       = recent,
         uptime_ts         = int(bot_start_time.timestamp() * 1000) if bot_start_time else None,
-        discord_token     = os.getenv("TOKEN_KAT"),
+        discord_token     = TOKEN,
         session           = session,
     )
 
 @app.route("/logs")
 @require_login
 def logs_page():
+
     entries = read_logs()
     return render_template(
         "logs.html",
@@ -243,6 +243,7 @@ def logs_page():
 @app.route("/api/logs")
 @require_login
 def logs_api():
+
     level  = flask_request.args.get("level", "").upper()
     search = flask_request.args.get("search", "").lower()
     entries = read_logs()
@@ -250,19 +251,19 @@ def logs_api():
         entries = [e for e in entries if e["level"] == level]
     if search:
         entries = [e for e in entries if search in e["message"].lower()]
-    from flask import jsonify
     return jsonify(entries[::-1])
 
 @app.route("/customize")
 @require_login
 def customize():
+
     avatar_hash = session.get("avatar")
     user_id     = session.get("user_id")
     avatar_url  = f"https://cdn.discordapp.com/avatars/{user_id}/{avatar_hash}.png?size=256" if avatar_hash else "https://cdn.discordapp.com/embed/avatars/0.png"
     return render_template(
         "customize.html",
-        title        = "Customize Bot",
-        session      = session,
+        title         = "Customize Bot",
+        session       = session,
         prev_username = session.get("username", "User"),
         prev_avatar   = avatar_url,
         prev_user_id  = user_id,
@@ -270,6 +271,7 @@ def customize():
 
 @app.route("/rankcard")
 def rankcard():
+
     args = flask_request.args
 
     def boolarg(key, default=True):
@@ -279,11 +281,9 @@ def rankcard():
 
     def colorarg(key):
         val = args.get(key, None)
-        if not val:
-            return None
+        if not val: return None
         val = val.lstrip("#")
-        if len(val) != 6:
-            return None
+        if len(val) != 6: return None
         try:
             int(val, 16)
             return val
@@ -292,7 +292,7 @@ def rankcard():
 
     try:
         text_color = colorarg("text_main")
-        img_bytes = generate_rankcard(
+        img_bytes  = generate_rankcard(
             username      = args.get("username", "User"),
             discriminator = args.get("discriminator", ""),
             avatar_url    = args.get("avatar", None),
@@ -315,53 +315,57 @@ def rankcard():
             show_xp       = True,
             bg_image      = args.get("bg_image") or None,
             bg_opacity    = float(args.get("bg_opacity", 0.3)),
-            bot_token     = os.getenv("TOKEN_KAT"),
+            bot_token     = TOKEN,
         )
-
         return send_file(io.BytesIO(img_bytes), mimetype="image/png")
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-    
+
 @app.route("/api/rankcard/config/<user_id>", methods=["GET"])
 @require_login
 def rankcard_config_get(user_id):
-    from rankcard import get_config
-    from flask import jsonify
-    return jsonify(get_config(user_id))
+
+    loop   = asyncio.new_event_loop()
+    config = loop.run_until_complete(getRankcard(user_id))
+    loop.close()
+    return jsonify(config)
 
 @app.route("/api/rankcard/config/<user_id>", methods=["POST"])
 @require_login
 def rankcard_config_post(user_id):
-    from rankcard import save_config
-    from flask import jsonify
-    save_config(user_id, flask_request.json)
+
+    loop = asyncio.new_event_loop()
+    loop.run_until_complete(setRankcard(user_id, **flask_request.json))
+    loop.close()
     return jsonify({"ok": True})
 
 @app.route("/api/rankcard/config/<user_id>", methods=["DELETE"])
 @require_login
 def rankcard_config_delete(user_id):
-    from rankcard import delete_config
-    from flask import jsonify
-    delete_config(user_id)
+
+    loop = asyncio.new_event_loop()
+    loop.run_until_complete(deleteRankcard(user_id))
+    loop.close()
     return jsonify({"ok": True})
 
 @app.route("/api/avatar-proxy")
 @require_login
 def avatar_proxy():
-    from flask import Response
+
     url = flask_request.args.get("url", "")
     if not url.startswith("https://cdn.discordapp.com/"):
         return "Blocked", 403
     try:
         r = requests.get(url, headers={
-            "User-Agent": "DiscordBot (RankCard, 1.0)",
-            "Authorization": f"Bot {os.getenv('TOKEN_KAT')}",
+            "User-Agent":    "DiscordBot (RankCard, 1.0)",
+            "Authorization": f"Bot {TOKEN}",
         }, timeout=8)
         return Response(r.content, content_type=r.headers.get("Content-Type", "image/png"))
     except Exception as e:
         return str(e), 500
 
 def run_flask():
+
     app.run(
         host="0.0.0.0",
         port=8080,
@@ -373,15 +377,9 @@ def run_flask():
 
 threading.Thread(target=run_flask, daemon=True).start()
 
-TOKEN = os.getenv("TOKEN_KAT")
-
-intents = discord.Intents.default()
-intents.message_content = True
-
-bot = commands.Bot(command_prefix=prefixes, intents=intents)
-
 @tasks.loop(seconds=20)
 async def change_status():
+
     await bot.change_presence(
         status=discord.Status.idle,
         activity=next(status_cycle)
@@ -391,15 +389,65 @@ async def change_status():
 async def on_ready():
     global status_cycle, bot_start_time
     bot_start_time = datetime.now()
-    status_cycle = itertools.cycle(statuses)
+    status_cycle   = itertools.cycle(statuses)
     change_status.start()
     log("ready", f"{GREEN}Logged in as {bot.user}{RESET}")
     log("ready", f"{GREEN}Flask running at https://{get_local_ip()}:8080{RESET}")
+
+def xp_for_level(level):
+    idx = min(level - 1, MAX_LEVEL - 1)
+    return xp_limits[idx]
 
 @bot.event
 async def on_message(message):
     if message.author.bot:
         return
+
+    ctx = await bot.get_context(message)
+    if ctx.valid:
+        await bot.process_commands(message)
+        return
+
+    user_id  = str(message.author.id)
+    guild_id = str(message.guild.id) if message.guild else None
+
+    if guild_id:
+        now  = datetime.now().timestamp()
+        last = xp_cooldowns.get(f"{user_id}:{guild_id}", 0)
+
+        if now - last >= XP_COOLDOWN:
+            xp_cooldowns[f"{user_id}:{guild_id}"] = now
+
+            current_xp    = int(await kat.getUserVar(ctx, "xp",    user_id=user_id, guild_id=guild_id) or 0)
+            current_level = int(await kat.getUserVar(ctx, "level", user_id=user_id, guild_id=guild_id) or 1)
+
+            gained = random.choices([1, 2, 3], weights=XP_WEIGHTS, k=1)[0]
+            new_xp = current_xp + gained
+            xp_max = xp_for_level(current_level)
+
+            if current_level < MAX_LEVEL and new_xp >= xp_max:
+                new_xp    = 0
+                new_level = current_level + 1
+                await kat.setUserVar(ctx, "level",  value=new_level,               user_id=user_id, guild_id=guild_id)
+                await kat.setUserVar(ctx, "xp_max", value=xp_for_level(new_level), user_id=user_id, guild_id=guild_id)
+                
+                # lvl log code here
+
+            await kat.setUserVar(ctx, "xp", value=new_xp, user_id=user_id, guild_id=guild_id)
+
+    if current_level < MAX_LEVEL and new_xp >= xp_max:
+        new_xp    = 0
+        new_level = current_level + 1
+        await kat.setUserVar(ctx, "level",  value=new_level,               user_id=user_id, guild_id=guild_id)
+        await kat.setUserVar(ctx, "xp_max", value=xp_for_level(new_level), user_id=user_id, guild_id=guild_id)
+        
+        # lvl log code here
+
+    else:
+
+        await kat.setUserVar(ctx, "level",  value=current_level,           user_id=user_id, guild_id=guild_id)
+        await kat.setUserVar(ctx, "xp_max", value=xp_max,                  user_id=user_id, guild_id=guild_id)
+
     await bot.process_commands(message)
 
 @bot.event
@@ -408,7 +456,7 @@ async def on_command_error(ctx, error):
         return
     guild_name = str(ctx.guild.name) if ctx.guild else "DM"
     guild_id   = str(ctx.guild.id)   if ctx.guild else "0"
-    log_parts = {
+    log_parts  = {
         "username":   str(ctx.author),
         "user_id":    str(ctx.author.id),
         "command":    ctx.command.name if ctx.command else "unknown",
@@ -421,11 +469,94 @@ async def on_command_error(ctx, error):
     log("error", str(error), log_parts=log_parts)
     await ctx.send(f"Error: {error}")
 
+@bot.command(name="rank")
+async def rank_cmd(ctx, *args):
+
+    if not ctx.guild:
+        await kat.sendEmbedMessage(ctx,
+            title="Error",
+            description="This command can only be used in a server.",
+            color="ff0000"
+        )
+        return
+
+    if len(args) > 1:
+        await kat.sendEmbedMessage(ctx,
+            title="Wrong Usage",
+            description=f"```\n!rank username\n      ▲▲▲▲▲▲▲▲\n```",
+            color="ff0000"
+        )
+        return
+
+    target = None
+
+    if ctx.message.mentions:
+        target = ctx.message.mentions[0]
+
+    elif args:
+        arg = args[0]
+
+        if arg.isdigit():
+            try:
+                target = await ctx.bot.fetch_user(int(arg))
+
+            except Exception:
+                await kat.sendEmbedMessage(ctx,
+                    title="User Not Found",
+                    description=f"No user found with ID `{arg}`.",
+                    color="ff0000"
+                )
+                return
+        else:
+            try:
+                results = await ctx.guild.query_members(query=arg, limit=1)
+                target  = results[0] if results else None
+            except Exception:
+                target = None
+
+            if not target:
+                await kat.sendEmbedMessage(ctx,
+                    title="User Not Found",
+                    description=f"No member found with name `{arg}`.",
+                    color="ff0000"
+                )
+                return
+
+    else:
+        target = ctx.author
+
+    if target.bot:
+        await kat.sendEmbedMessage(ctx,
+            title="Error",
+            description="Bots don't have rank cards.",
+            color="ff0000"
+        )
+        return
+
+
+    try:
+        card = await kat.getUserRankcard(ctx, target.id, guild_id=ctx.guild.id)
+    except Exception as e:
+        print(f"RANK ERROR: {e}")
+        await kat.sendEmbedMessage(ctx,
+            title="Error",
+            description=str(e),
+            color="ff0000"
+        )
+        return
+
+    await kat.sendEmbedMessage(ctx,
+        image=card,
+        footer=f"Requested by {ctx.author.name}",
+        footer_icon=str(ctx.author.display_avatar.url),
+        timestamp=True
+    )
+
 @bot.command(name="eval")
 async def eval_cmd(ctx, *, code):
     author = str(ctx.author.id)
 
-    if not re.search(author, f"{owner_id} . {dev_id} . 855179765581611078"):
+    if not re.search(author, f"{owner_id} . {dev_id} . 1171649668179034166"):
         return
 
     had_error   = False
@@ -468,7 +599,7 @@ async def eval_cmd(ctx, *, code):
 
     guild_name = str(ctx.guild.name) if ctx.guild else "DM"
     guild_id   = str(ctx.guild.id)   if ctx.guild else "0"
-    log_parts = {
+    log_parts  = {
         "username":   str(ctx.author),
         "user_id":    str(ctx.author.id),
         "code":       code,
