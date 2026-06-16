@@ -46,10 +46,13 @@
                 <span>Customize</span>
             </a>
 
+            {% if can_view_logs %}
             <a href="/logs" class="nav-item {{ 'active' if request.path == '/logs' else '' }}">
                 <i class="ti ti-file-text"></i>
                 <span>Logs</span>
             </a>
+            {% endif %}
+
         </nav>
 
         <div class="sidebar-footer">

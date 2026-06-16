@@ -159,10 +159,13 @@
         <div class="dash-card-head">
             <span>Recent Activity</span>
 
+            {% if can_view_logs %}
             <a href="/logs" class="dash-card-link">
                 View all
                 <i class="ti ti-arrow-right"></i>
             </a>
+            {% endif %}
+
         </div>
 
         <div class="mini-log">
@@ -254,24 +257,5 @@
     setInterval(updateUptime, 1000);
     updateUptime();
 
-    const botId = {{ bot_id | tojson }};
-    if (botId && botId !== '-') {
-        fetch(`https://discord.com/api/v10/users/${botId}`, {
-            headers: { 'Authorization': 'Bot {{ discord_token }}' }
-        })
-        .then(r => r.ok ? r.json() : null)
-        .then(data => {
-            if (!data || !data.avatar) return;
-            const url = `https://cdn.discordapp.com/avatars/${data.id}/${data.avatar}.png?size=128`;
-            const img = document.getElementById('botAvatar');
-            const fallback = document.getElementById('avatarFallback');
-            img.src = url;
-            img.style.display = '';
-            fallback.style.display = 'none';
-            const sidebarAvatar = document.querySelector('.bot-avatar img');
-            if (sidebarAvatar) sidebarAvatar.src = url;
-        })
-        .catch(() => {});
-    }
 </script>
 {% endblock %}

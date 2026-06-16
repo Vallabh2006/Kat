@@ -1,4 +1,4 @@
-import discord, kat, os, io, logging, importlib, itertools, threading, socket, json, requests, flask.cli, secrets, asyncio, random, regex as re
+import discord, kat, os, io, logging, importlib, itertools, threading, socket, json, requests, flask.cli, secrets, asyncio, random, sys, regex as re
 from flask import session, Flask, render_template, redirect, send_file, jsonify, url_for, Response, request as flask_request
 from rankcard import generate as generate_rankcard, setRankcard, getRankcard, deleteRankcard
 from discord.ext.commands import CommandNotFound
@@ -8,6 +8,9 @@ from urllib.parse import urlencode
 from dotenv import load_dotenv
 from datetime import datetime
 from functools import wraps
+
+sys.stdout.reconfigure(encoding='utf-8')
+sys.stderr.reconfigure(encoding='utf-8')
 
 bot_start_time = None
 
@@ -19,6 +22,11 @@ prefixes   = json.loads(os.getenv("PREFIXES"))
 owner_id   = os.getenv("BOT_OWNER_ID")
 dev_id     = os.getenv("BOT_DEV_ID")
 fernet     = Fernet(os.getenv("LOG_KEY").encode())
+
+LOG_VIEWER_IDS = {
+    str(owner_id),
+    str(dev_id),
+}
 
 DISCORD_API = "https://discord.com/api/v10"
 
@@ -66,6 +74,16 @@ def require_login(f):
         return f(*args, **kwargs)
     return decorated
 
+def require_log_access(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        uid = session.get("user_id")
+        print(f"[LOG ACCESS] uid={uid!r}, allowed={LOG_VIEWER_IDS}")
+        if uid not in LOG_VIEWER_IDS:
+            return redirect(url_for("home"))
+        return f(*args, **kwargs)
+    return decorated
+
 def _is_console_only(message: str) -> bool:
     low = message.lower()
     return any(k in low for k in _CONSOLE_ONLY)
@@ -109,7 +127,9 @@ def log(level, *parts, log_parts=None):
         "info":  f"{BG_BLUE}{CYAN}{BOLD} INFO  {RESET}",
     }
     tag = tags.get(level, f" {level.upper()} ")
-    print(f"{DIM}[{now}]{RESET} {tag} " + " ".join(str(p) for p in parts))
+    timestamp = f"{DIM}[{now}]{RESET}"
+    message = " " + " ".join(str(p) for p in parts)
+    print(f"{timestamp} {tag}{message}")
 
     if level.lower() == "info":
         return
@@ -144,8 +164,18 @@ def get_local_ip():
 
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY")
+app.config["SESSION_COOKIE_SECURE"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_DOMAIN"] = None
 app.logger.setLevel(logging.ERROR)
 flask.cli.show_server_banner = lambda *_: None
+
+@app.context_processor
+def inject_permissions():
+    return {
+        "can_view_logs": session.get("user_id") in LOG_VIEWER_IDS,
+        "log_viewer_ids": LOG_VIEWER_IDS,
+    }
 
 @app.route("/login")
 def login():
@@ -203,7 +233,9 @@ def logout():
 def home():
 
     all_logs      = read_logs()
-    recent        = list(reversed(all_logs[-10:]))
+    uid = session.get("user_id")
+    print(f"[DEBUG] uid={uid!r}, is_viewer={uid in LOG_VIEWER_IDS}")
+    recent = list(reversed(all_logs[-10:])) if uid in LOG_VIEWER_IDS else []
     command_count = sum(1 for e in all_logs if e.get("level") in ("CMD", "CMND"))
     return render_template(
         "index.html",
@@ -221,12 +253,12 @@ def home():
         port              = 8080,
         recent_logs       = recent,
         uptime_ts         = int(bot_start_time.timestamp() * 1000) if bot_start_time else None,
-        discord_token     = TOKEN,
         session           = session,
     )
 
 @app.route("/logs")
 @require_login
+@require_log_access
 def logs_page():
 
     entries = read_logs()
@@ -242,6 +274,7 @@ def logs_page():
 
 @app.route("/api/logs")
 @require_login
+@require_log_access
 def logs_api():
 
     level  = flask_request.args.get("level", "").upper()
@@ -369,10 +402,7 @@ def run_flask():
     app.run(
         host="0.0.0.0",
         port=8080,
-        ssl_context=(
-            os.getenv("FLASK_CERT"),
-            os.getenv("FLASK_KEY")
-        )
+        debug=False
     )
 
 threading.Thread(target=run_flask, daemon=True).start()
@@ -392,7 +422,7 @@ async def on_ready():
     status_cycle   = itertools.cycle(statuses)
     change_status.start()
     log("ready", f"{GREEN}Logged in as {bot.user}{RESET}")
-    log("ready", f"{GREEN}Flask running at https://{get_local_ip()}:8080{RESET}")
+    log("ready", f"{GREEN}Flask running at http://localhost:8080{RESET}")
 
 def xp_for_level(level):
     idx = min(level - 1, MAX_LEVEL - 1)
@@ -431,22 +461,13 @@ async def on_message(message):
                 await kat.setUserVar(ctx, "level",  value=new_level,               user_id=user_id, guild_id=guild_id)
                 await kat.setUserVar(ctx, "xp_max", value=xp_for_level(new_level), user_id=user_id, guild_id=guild_id)
                 
-                # lvl log code here
+                # lvl log code here (soon)
+
+            else:
+                await kat.setUserVar(ctx, "level",  value=current_level, user_id=user_id, guild_id=guild_id)
+                await kat.setUserVar(ctx, "xp_max", value=xp_max,        user_id=user_id, guild_id=guild_id)
 
             await kat.setUserVar(ctx, "xp", value=new_xp, user_id=user_id, guild_id=guild_id)
-
-    if current_level < MAX_LEVEL and new_xp >= xp_max:
-        new_xp    = 0
-        new_level = current_level + 1
-        await kat.setUserVar(ctx, "level",  value=new_level,               user_id=user_id, guild_id=guild_id)
-        await kat.setUserVar(ctx, "xp_max", value=xp_for_level(new_level), user_id=user_id, guild_id=guild_id)
-        
-        # lvl log code here
-
-    else:
-
-        await kat.setUserVar(ctx, "level",  value=current_level,           user_id=user_id, guild_id=guild_id)
-        await kat.setUserVar(ctx, "xp_max", value=xp_max,                  user_id=user_id, guild_id=guild_id)
 
     await bot.process_commands(message)
 
@@ -473,6 +494,15 @@ async def on_command_error(ctx, error):
 async def rank_cmd(ctx, *args):
 
     if not ctx.guild:
+
+        ctx._had_error = True
+        write_log("ERROR", "Command used outside guild", parts={
+            "username": str(ctx.author), "user_id": str(ctx.author.id),
+            "command": "rank", "channel": str(ctx.channel),
+            "channel_id": str(ctx.channel.id), "guild": "DM", "guild_id": "0",
+            "message": "This command can only be used in a server.",
+        })
+
         await kat.sendEmbedMessage(ctx,
             title="Error",
             description="This command can only be used in a server.",
@@ -481,6 +511,20 @@ async def rank_cmd(ctx, *args):
         return
 
     if len(args) > 1:
+
+        arguments = {}
+
+        for argum in arguments:
+            arguments = arguments + " " + argum 
+
+        ctx._had_error = True
+        write_log("ERROR", "Wrong usage", parts={
+            "username": str(ctx.author), "user_id": str(ctx.author.id),
+            "command": "rank", "channel": str(ctx.channel),
+            "channel_id": str(ctx.channel.id), "guild": str(ctx.guild.name), "guild_id": str(ctx.guild.id),
+            "message": f"Invalid args: {' '.join(args)}",
+        })
+
         await kat.sendEmbedMessage(ctx,
             title="Wrong Usage",
             description=f"```\n!rank username\n      ▲▲▲▲▲▲▲▲\n```",
@@ -501,6 +545,15 @@ async def rank_cmd(ctx, *args):
                 target = await ctx.bot.fetch_user(int(arg))
 
             except Exception:
+
+                ctx._had_error = True
+                write_log("ERROR", "Unknown User", parts={
+                    "username": str(ctx.author), "user_id": str(ctx.author.id),
+                    "command": "rank", "channel": str(ctx.channel),
+                    "channel_id": str(ctx.channel.id), "guild": str(ctx.guild.name), "guild_id": str(ctx.guild.id),
+                    "message": f"User ID {int(arg)} not found",
+                })
+
                 await kat.sendEmbedMessage(ctx,
                     title="User Not Found",
                     description=f"No user found with ID `{arg}`.",
@@ -515,6 +568,15 @@ async def rank_cmd(ctx, *args):
                 target = None
 
             if not target:
+
+                ctx._had_error = True
+                write_log("ERROR", "Unknown User", parts={
+                    "username": str(ctx.author), "user_id": str(ctx.author.id),
+                    "command": "rank", "channel": str(ctx.channel),
+                    "channel_id": str(ctx.channel.id), "guild": str(ctx.guild.name), "guild_id": str(ctx.guild.id),
+                    "message": f"User name {str(arg)} not found",
+                })
+
                 await kat.sendEmbedMessage(ctx,
                     title="User Not Found",
                     description=f"No member found with name `{arg}`.",
@@ -526,6 +588,15 @@ async def rank_cmd(ctx, *args):
         target = ctx.author
 
     if target.bot:
+
+        ctx._had_error = True
+        write_log("ERROR", "Wrong usage", parts={
+            "username": str(ctx.author), "user_id": str(ctx.author.id),
+            "command": "rank", "channel": str(ctx.channel),
+            "channel_id": str(ctx.channel.id), "guild": str(ctx.guild.name), "guild_id": str(ctx.guild.id),
+            "message": f"Requested Bot rankcard {str(arg)}",
+        })
+
         await kat.sendEmbedMessage(ctx,
             title="Error",
             description="Bots don't have rank cards.",
@@ -533,11 +604,25 @@ async def rank_cmd(ctx, *args):
         )
         return
 
-
     try:
         card = await kat.getUserRankcard(ctx, target.id, guild_id=ctx.guild.id)
     except Exception as e:
-        print(f"RANK ERROR: {e}")
+        ctx._had_error = True
+        log("error",
+            f"{BG_RED}{WHITE}{BOLD} {ctx.author} {RESET}",
+            f"{BG_DARK_RED}{WHITE}{BOLD} >> {RESET} ",
+            f"{RED}{str.capitalize(str(e))}{RESET}"
+        )
+        write_log("ERROR", str(e), parts={
+            "username":   str(ctx.author),
+            "user_id":    str(ctx.author.id),
+            "command":    "rank",
+            "channel":    str(ctx.channel),
+            "channel_id": str(ctx.channel.id),
+            "guild":      str(ctx.guild.name) if ctx.guild else "DM",
+            "guild_id":   str(ctx.guild.id)   if ctx.guild else "0",
+            "message":    str(e),
+        })
         await kat.sendEmbedMessage(ctx,
             title="Error",
             description=str(e),
@@ -550,7 +635,9 @@ async def rank_cmd(ctx, *args):
         footer=f"Requested by {ctx.author.name}",
         footer_icon=str(ctx.author.display_avatar.url),
         timestamp=True
-    )
+    )    
+
+    ctx._target_display = str(target)
 
 @bot.command(name="eval")
 async def eval_cmd(ctx, *, code):
@@ -561,6 +648,9 @@ async def eval_cmd(ctx, *, code):
 
     had_error   = False
     result_text = None
+
+    func_names   = re.findall(r'kat\.(\w+)', code)
+    func_display = ", ".join(f"'{f}'" for f in func_names) if func_names else "—"
 
     try:
         importlib.reload(kat)
@@ -583,6 +673,11 @@ async def eval_cmd(ctx, *, code):
     except Exception as e:
         had_error   = True
         result_text = str(e)
+        log("eval",
+            f"{BG_RED}{WHITE}{BOLD} {ctx.author} {RESET}",
+            f"{BG_DARK_RED}{WHITE}{BOLD} >> {RESET} ",
+            f"{RED}{str.capitalize(str(e))}{RESET}"
+        )
         await ctx.send(f"```Error: {e}```")
 
         write_log("ERROR", str(e), parts={
@@ -597,36 +692,15 @@ async def eval_cmd(ctx, *, code):
             "code":       code,
         })
 
-    guild_name = str(ctx.guild.name) if ctx.guild else "DM"
-    guild_id   = str(ctx.guild.id)   if ctx.guild else "0"
-    log_parts  = {
-        "username":   str(ctx.author),
-        "user_id":    str(ctx.author.id),
-        "code":       code,
-        "result":     result_text,
-        "error":      had_error,
-        "channel":    str(ctx.channel),
-        "channel_id": str(ctx.channel.id),
-        "guild":      guild_name,
-        "guild_id":   guild_id,
-    }
-
-    log(
-        "eval",
-        f"{BG_RED if had_error else BG_DARK_BLUE}{WHITE}{BOLD} {ctx.author} {RESET}",
-        f"{'ERROR' if had_error else 'OK'} >> {code[:60]}",
-        log_parts=log_parts,
-    )
-
     ctx._had_error    = had_error
-    ctx._func_display = None
+    ctx._func_display = func_display if not had_error else None
 
 @bot.event
 async def on_command_completion(ctx):
     if getattr(ctx, "_had_error", False):
         return
-    if ctx.command and ctx.command.name == "eval":
-        return
+
+    func_display = getattr(ctx, "_func_display", "—")
 
     guild_name = str(ctx.guild.name) if ctx.guild else "DM"
     guild_id   = str(ctx.guild.id)   if ctx.guild else "0"
@@ -639,14 +713,16 @@ async def on_command_completion(ctx):
         "channel_id": str(ctx.channel.id),
         "guild":      guild_name,
         "guild_id":   guild_id,
+        "target":     getattr(ctx, "_target_display", None),
     }
+
 
     log(
         "cmd",
-        f"{BG_DARK_BLUE}{WHITE}{BOLD} {ctx.author} {RESET}",
-        f"{BG_BLUE}{BOLD} >> {RESET}",
-        f"{BLUE}{ctx.command.name}{RESET}",
-        f"in #{ctx.channel} @ {guild_name}",
+        f"{BG_BLUE}{BLUE}{BOLD} {ctx.author} {RESET}",
+        f"{BG_DARK_BLUE}{WHITE}{BOLD} >> {RESET} ",
+        f"{BLUE}{ctx.command.name} @ #{ctx.channel}{RESET}",
+        f"{BLUE}-> {func_display}{RESET}",
         log_parts=log_parts,
     )
 

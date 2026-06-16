@@ -107,6 +107,15 @@
                         <span class="cmd-chip cmd-name">
                             <i class="ti ti-terminal-2"></i>{{ entry.parts.command }}
                         </span>
+
+                        {% if entry.parts.target %}
+                            <span class="mini-sep">›</span>
+                            <span class="mini-chip">
+                                <i class="ti ti-user" style="font-size:11px;"></i>
+                                {{ entry.parts.target }}
+                            </span>
+                        {% endif %}
+
                     </span>
 
                 {% elif entry.level == 'EVAL' and entry.parts %}
