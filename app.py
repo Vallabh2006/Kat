@@ -1,4 +1,5 @@
-import discord, kat, os, io, logging, importlib, itertools, threading, socket, json, requests, flask.cli, secrets, asyncio, random, sys, regex as re
+import discord, time, kat, os, io, logging, importlib, itertools, threading, socket, json, requests, flask.cli, secrets, asyncio, random, sys, regex as re
+import custom_commands as c_cmds
 from flask import session, Flask, render_template, redirect, send_file, jsonify, url_for, Response, request as flask_request
 from rankcard import generate as generate_rankcard, setRankcard, getRankcard, deleteRankcard
 from discord.ext.commands import CommandNotFound
@@ -16,17 +17,16 @@ bot_start_time = None
 
 load_dotenv()
 
+STOP_FLAG = "X:\\Documents\\Codes\\Python\\Discord\\kat\\stop.flag"
+
 TOKEN = os.getenv("TOKEN_KAT")
 
 prefixes   = json.loads(os.getenv("PREFIXES"))
 owner_id   = os.getenv("BOT_OWNER_ID")
-dev_id     = os.getenv("BOT_DEV_ID")
+dev_ids = json.loads(os.getenv("BOT_DEV_IDS"))
 fernet     = Fernet(os.getenv("LOG_KEY").encode())
 
-LOG_VIEWER_IDS = {
-    str(owner_id),
-    str(dev_id),
-}
+LOG_VIEWER_IDS = {str(owner_id), *dev_ids}
 
 DISCORD_API = "https://discord.com/api/v10"
 
@@ -42,7 +42,8 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix=prefixes, intents=intents)
 
-os.makedirs("logs", exist_ok=True)
+LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+os.makedirs(LOG_DIR, exist_ok=True)
 
 statuses = [
     discord.CustomActivity(name=os.getenv("STATUS_1")),
@@ -99,13 +100,13 @@ def write_log(level, message, parts=None):
     if parts:
         entry["parts"] = parts
     encrypted = fernet.encrypt(json.dumps(entry).encode())
-    with open("logs/kat.log", "ab") as f:
+    with open(os.path.join(LOG_DIR, "kat.log"), "ab") as f:
         f.write(encrypted + b"\n")
 
 def read_logs():
     entries = []
     try:
-        with open("logs/kat.log", "rb") as f:
+        with open(os.path.join(LOG_DIR, "kat.log"), "rb") as f:
             for line in f:
                 line = line.strip()
                 if line:
@@ -409,11 +410,15 @@ threading.Thread(target=run_flask, daemon=True).start()
 
 @tasks.loop(seconds=20)
 async def change_status():
-
-    await bot.change_presence(
-        status=discord.Status.idle,
-        activity=next(status_cycle)
-    )
+    if not bot.is_ready():
+        return
+    try:
+        await bot.change_presence(
+            status=discord.Status.idle,
+            activity=next(status_cycle)
+        )
+    except Exception:
+        pass
 
 @bot.event
 async def on_ready():
@@ -639,11 +644,31 @@ async def rank_cmd(ctx, *args):
 
     ctx._target_display = str(target)
 
+
+
+@bot.command(name="top")
+async def top_cmd(ctx, limit: int = 10):
+    importlib.reload(c_cmds)
+    await c_cmds.top(ctx, bot, log, {
+        "RESET": RESET, "BOLD": BOLD,
+        "BLUE": BLUE, "WHITE": WHITE,
+        "BG_BLUE": BG_BLUE, "BG_DARK_BLUE": BG_DARK_BLUE,
+    }, limit)
+
+@bot.command(name="uptime")
+async def uptime_cmd(ctx):
+    importlib.reload(c_cmds)
+    await c_cmds.uptime(ctx, bot, bot_start_time, log, {
+        "RESET": RESET, "BOLD": BOLD,
+        "BLUE": BLUE, "WHITE": WHITE,
+        "BG_BLUE": BG_BLUE, "BG_DARK_BLUE": BG_DARK_BLUE,
+    })
+
 @bot.command(name="eval")
 async def eval_cmd(ctx, *, code):
     author = str(ctx.author.id)
 
-    if not re.search(author, f"{owner_id} . {dev_id} . 1171649668179034166"):
+    if author not in dev_ids and author != str(owner_id):
         return
 
     had_error   = False
@@ -651,6 +676,9 @@ async def eval_cmd(ctx, *, code):
 
     func_names   = re.findall(r'kat\.(\w+)', code)
     func_display = ", ".join(f"'{f}'" for f in func_names) if func_names else "—"
+
+    guild_name = str(ctx.guild.name) if ctx.guild else "DM"
+    guild_id   = str(ctx.guild.id)   if ctx.guild else "0"
 
     try:
         importlib.reload(kat)
@@ -673,24 +701,24 @@ async def eval_cmd(ctx, *, code):
     except Exception as e:
         had_error   = True
         result_text = str(e)
-        log("eval",
-            f"{BG_RED}{WHITE}{BOLD} {ctx.author} {RESET}",
-            f"{BG_DARK_RED}{WHITE}{BOLD} >> {RESET} ",
-            f"{RED}{str.capitalize(str(e))}{RESET}"
-        )
         await ctx.send(f"```Error: {e}```")
 
-        write_log("ERROR", str(e), parts={
+    log(
+        "eval",
+        f"{BG_DARK_RED if had_error else BG_DARK_BLUE}{WHITE}{BOLD} {ctx.author} {RESET}",
+        f"{'ERROR' if had_error else 'OK'} >> {code[:60]}",
+        log_parts={
             "username":   str(ctx.author),
             "user_id":    str(ctx.author.id),
-            "command":    "eval",
             "channel":    str(ctx.channel),
             "channel_id": str(ctx.channel.id),
-            "guild":      str(ctx.guild.name) if ctx.guild else "DM",
-            "guild_id":   str(ctx.guild.id)   if ctx.guild else "0",
-            "message":    str(e),
+            "guild":      guild_name,
+            "guild_id":   guild_id,
             "code":       code,
-        })
+            "result":     result_text,
+            "error":      had_error,
+        },
+    )
 
     ctx._had_error    = had_error
     ctx._func_display = func_display if not had_error else None
@@ -698,6 +726,9 @@ async def eval_cmd(ctx, *, code):
 @bot.event
 async def on_command_completion(ctx):
     if getattr(ctx, "_had_error", False):
+        return
+    
+    if ctx.command and ctx.command.name == "eval":
         return
 
     func_display = getattr(ctx, "_func_display", "—")
@@ -726,12 +757,23 @@ async def on_command_completion(ctx):
         log_parts=log_parts,
     )
 
-try:
-    bot.run(TOKEN)
+async def start_bot():
+    while True:
+        if os.path.exists(STOP_FLAG):
+            log("info", f"{BLUE}Stop flag detected. Exiting.{RESET}")
+            break
+        try:
+            await bot.start(TOKEN)
+            break
+        except (discord.LoginFailure, discord.PrivilegedIntentsRequired) as e:
+            log("error", f"{RED}Fatal: {e}{RESET}")
+            break
+        except Exception as e:
+            log("error", f"{RED}Connection Error: {e}{RESET}")
+            log("info", f"{BLUE}Retrying in 15 seconds...{RESET}")
+            await asyncio.sleep(15)
 
-except Exception as e:
-    log("error",
-        f"{RED}Connection Error{RESET}",
-        f"{BG_DARK_RED}{WHITE}{BOLD} >> {RESET}"
-        f"{RED}{e}{RESET}"
-    )
+try:
+    asyncio.run(start_bot())
+except KeyboardInterrupt:
+    pass

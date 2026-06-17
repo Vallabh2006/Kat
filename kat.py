@@ -1,4 +1,4 @@
-import discord, asyncio, io, aiohttp, os, re, psycopg2, json, dotenv
+import discord, asyncio, io, os, re, psycopg2, json, dotenv
 from rankcard import generate, getRankcard as fetchRankcardCfg
 from datetime import datetime
 
@@ -1000,14 +1000,7 @@ async def getUserRankcard(ctx, user_id, guild_id=None):
     level  = int(await getUserVar(ctx, "level",  user_id=user_id, guild_id=guild_id) or 1)
     xp_max = int(await getUserVar(ctx, "xp_max", user_id=user_id, guild_id=guild_id) or 100)
 
-
-
-
-
     rank = await _getUserRank(ctx, user_id, guild_id) or None
-
-
-
 
     img_bytes = generate(
         username   = username,
@@ -1022,3 +1015,4 @@ async def getUserRankcard(ctx, user_id, guild_id=None):
     buf = io.BytesIO(img_bytes)
     buf.seek(0)
     return discord.File(buf, filename=f"{username}_rankcard.png")
+

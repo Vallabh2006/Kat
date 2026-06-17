@@ -38,7 +38,7 @@ cd  kat
 ### 2. Install Dependencies
 
 ```bash
-pip  install  -r  requirements.txt
+pip install -r requirements.txt
 ```
 
 ### 3. Configure Environment Variables
@@ -47,14 +47,19 @@ Create a `.env` file:
 
 ```env
 TOKEN_KAT=INSERT_DEFAULT_DISCORD_BOT_TOKEN_HERE
-TOKEN_<ANOTHER_BOT_NAME>=INSERT_EXTRA_DISCORD_BOT_TOKEN_IF_NEEDED
-  
+
+DISCORD_CLIENT_SECRET=INSERT_CLIENT_SECRET_JERE
+DISCORD_CLIENT_ID=INSERT_CLIENT_ID_HERE
+
+DISCORD_REDIRECT_URI=INSERT_REDIRECT_URI_HERE
+
 PREFIXES=["!", "."]
 
 BOT_OWNER_ID=INSERT_BOT_OWNER_ID_HERE
-BOT_DEV_ID=INSERT_BOT_DEV_ID_HERE
+BOT_DEV_IDS=["DEV_ID_1", "DEV_ID_2", "DEV_ID_3" , .... "DEV_ID_X"]
 
 LOG_KEY=INSERT_LOG_KEY_HERE
+FLASK_SECRET_KEY=INSERT_FLASK_SECRET_KEY_HERE
 
 STATUS_COUNT=2
 STATUS_1=You are being watched, Say Cheese
@@ -68,6 +73,8 @@ DB_PORT=INSERT_DATABASE_PORT_HERE
 DB_NAME=INSERT_DATABASE_NAME_HERE
 DB_USER=INSERT_DATABASE_USERNAME_HERE
 DB_PASSWORD=INSERT_DATABASE_PASSWORD_HERE
+
+XP_LIMITS = [100, 115, 152, 200 ...... upto as many levels you need]
 ```
 
 ### 4. Run Kat
@@ -158,7 +165,7 @@ Prefixes are loaded from `.env`:
 #### Local Images
 
 ```python
-file:Files/sample1.jpg
+file:files/sample1.jpg
 ```
 
 Images may be supplied using either a URL or a local file path prefixed with `file:`.
@@ -184,6 +191,8 @@ Images may be supplied using either a URL or a local file path prefixed with `fi
 ## 🎮 Commands Available
 
 `!rank <username>`: Display your level, XP progress, server rank, and personalized rank card.
+`!top`: Display server's XP Loaderboards.
+`!uptime`: Display uptime info.
 
 ----------
 
@@ -194,6 +203,7 @@ Kat/
 │
 ├── app.py # Main application
 ├── kat.py # Utility function library
+├── custom_commands.py # Utility function library
 ├── rankcard.py # Rank card generator
 │
 ├── templates/
